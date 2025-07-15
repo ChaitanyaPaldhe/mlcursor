@@ -76,7 +76,7 @@ model = lgb.LGBMClassifier(n_estimators=epochs, learning_rate=lr)
 model.fit(X_train, y_train)
 print("Accuracy:", accuracy_score(y_test, model.predict(X_test)))
 {% elif framework == "catboost" %}
-model = CatBoostClassifier(iterations=epochs, learning_rate=lr, verbose=0)
+model = CatBoostClassifier(iterations=epochs, learning_rate=lr, verbose=0, logging_level='Silent', train_dir='outputs/.catboost')
 model.fit(X_train, y_train)
 print("Accuracy:", accuracy_score(y_test, model.predict(X_test)))
 {% elif framework == "tensorflow" %}
