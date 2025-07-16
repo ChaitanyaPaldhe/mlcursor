@@ -16,6 +16,24 @@ def query_ollama(prompt: str, model: str = "qwen2.5-coder:3b") -> str:
         print("Ollama error:", e.stderr.decode())
         return ""
 
+import subprocess
+import json
+import re
+
+def query_ollama(prompt: str, model: str = "qwen2.5-coder:3b") -> str:
+    try:
+        result = subprocess.run(
+            ["ollama", "run", model],
+            input=prompt.encode(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True
+        )
+        return result.stdout.decode().strip()
+    except subprocess.CalledProcessError as e:
+        print("Ollama error:", e.stderr.decode())
+        return ""
+
 def extract_config(prompt: str, model: str = "qwen2.5-coder:3b") -> dict:
     system_prompt = f"""
 You are an ML code assistant. A user will give you a natural language prompt.
@@ -50,4 +68,3 @@ Respond only with JSON.
     except json.JSONDecodeError:
         print("⚠️ Failed to parse LLM response:", response)
         return {}
-

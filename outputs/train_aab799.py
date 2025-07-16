@@ -4,20 +4,20 @@ import numpy as np
 
 # Framework-specific imports
 
+import lightgbm as lgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
 
 # Config from prompt
-model_name = "RandomForestClassifier"
+model_name = "LightGBM"
 dataset = "penguins"
-optimizer = "SGD"
+optimizer = "adam"
 lr = 0.01
-epochs = 10
+epochs = 100
 
-print(f"Training {model_name} on {dataset} for {epochs} epochs using sklearn...")
+print(f"Training {model_name} on {dataset} for {epochs} epochs using lightgbm...")
 
 # Generic tabular dataset loading logic (CSV assumed)
 try:
@@ -40,7 +40,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 
 # Training per framework
 
-model = RandomForestClassifier(n_estimators=epochs)
+model = lgb.LGBMClassifier(n_estimators=epochs, learning_rate=lr)
 model.fit(X_train, y_train)
 print("Accuracy:", accuracy_score(y_test, model.predict(X_test)))
 
