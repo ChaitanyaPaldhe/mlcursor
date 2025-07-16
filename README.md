@@ -50,6 +50,7 @@ mlcursor/
 │   └── logs.py             # (coming soon)
 ├── templates/
 │   └── train_template.py.j2  # Jinja2 template for ML training
+|   └── hpo_template.py.j2  # HPO template for tuning
 ├── outputs/                # Auto-generated training scripts
 ├── data/                   # Place custom CSVs here
 ├── config.yaml             # Configurations
