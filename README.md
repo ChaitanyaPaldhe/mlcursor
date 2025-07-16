@@ -37,7 +37,10 @@ pip install typer jinja2 pandas scikit-learn
 ollama pull qwen2.5-codeb3
 
 # 3. Run your first ML pipeline
-mlcursor "Train a RandomForestClassifier on the penguins dataset for 20 epochs"
+python cli.py train "Train a RandomForestClassifier on the penguins dataset for 20 epochs"
+
+# 4. Tune 
+python cli.py tune "Tune a decision tree on penguins dataset"
 
 📁 Project Structure
 mlcursor/
