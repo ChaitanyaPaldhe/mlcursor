@@ -1,0 +1,15 @@
+{
+  "model_name": "gradient_boosting",
+  "framework": "sklearn",
+  "dataset": "penguins",
+  "config": {
+    "class": "GradientBoostingClassifier",
+    "framework": "sklearn",
+    "import": "from sklearn.ensemble import GradientBoostingClassifier",
+    "default_params": {
+      "random_state": 42,
+      "n_estimators": 100,
+      "learning_rate": 0.1
+    }
+  }
+}

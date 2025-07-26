@@ -1,6 +1,0 @@
-{
-  "model_name": "LightGBMClassifier",
-  "framework": "lightgbm",
-  "dataset": "penguins",
-  "config": null
-}

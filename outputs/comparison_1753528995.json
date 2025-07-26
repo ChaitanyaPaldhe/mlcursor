@@ -1,0 +1,53 @@
+{
+  "timestamp": "2025-07-26 16:53:15",
+  "prompt": "dataset: penguins epochs: 50",
+  "models_compared": [
+    "random_forest",
+    "logistic_regression",
+    "svm",
+    "xgboost",
+    "XGBClassifier"
+  ],
+  "results": {
+    "random_forest": {
+      "status": "success",
+      "accuracy": 0.8806,
+      "training_time": 3.6727089881896973,
+      "framework": "sklearn",
+      "output": "[TRAIN] Received prompt: model: random_forest dataset: penguins epochs: 50\n[CONFIG] Extracting from prompt: model: random_forest dataset: penguins epochs: 50\n\u2705 LLM extracted config: {'framework': 'sklearn', 'model': 'RandomForestClassifier', 'dataset': 'penguins', 'optimizer': None, 'learning_rate': None, 'epochs': 50, 'batch_size': None, 'other_params': {'n_estimators': 100}}\n[REGISTRY] Applied model config for random_forest\n[PARSED CONFIG]:\n{\n  \"framework\": \"sklearn\",\n  \"model\": \"random_forest\",\n  \"dataset\": \"penguins\",\n  \"optimizer\": null,\n  \"learning_rate\": null,\n  \"epochs\": 50,\n  \"batch_size\": null,\n  \"other_params\": {\n    \"n_estimators\": 100,\n    \"random_state\": 42,\n    \"max_depth\": null\n  },\n  \"model_config\": {\n    \"framework\": \"sklearn\",\n    \"class\": \"RandomForestClassifier\",\n    \"import\": \"from sklearn.ensemble import RandomForestClassifier\",\n    \"default_params\": {\n      \"n_estimators\": 100,\n      \"random_state\": 42,\n      \"max_depth\": null\n    }\n  }\n}\n[SCRIPT GENERATED]: outputs/train_random_forest_8ea99e.py\n\u2705 numpy already installed.\n\u2705 pandas already installed.\n\u2705 seaborn already installed.\n\u2705 sklearn already installed.\n[EXECUTING] Running random_forest training...\nTraining random_forest on penguins for 50 epochs using sklearn...\nLoaded dataset from data/penguins.csv\nTraining set shape: (266, 6)\nTest set shape: (67, 6)\nModel parameters: {'n_estimators': 100, 'random_state': 42, 'max_depth': None}\nAccuracy: 0.8806\n\nClassification Report:\n              precision    recall  f1-score   support\n\n           0       0.91      0.86      0.89        36\n           1       0.85      0.90      0.88        31\n\n    accuracy                           0.88        67\n   macro avg       0.88      0.88      0.88        67\nweighted avg       0.88      0.88      0.88        67\n\n\nTraining completed successfully!\nModel info saved to outputs/model_info_random_forest.json\n\n"
+    },
+    "logistic_regression": {
+      "status": "success",
+      "accuracy": 0.0,
+      "training_time": 3.410280227661133,
+      "framework": "sklearn",
+      "output": "[TRAIN] Received prompt: model: logistic_regression dataset: penguins epochs: 50\n[CONFIG] Extracting from prompt: model: logistic_regression dataset: penguins epochs: 50\n\u2705 LLM extracted config: {'framework': 'scikit-learn', 'model': 'logistic_regression', 'dataset': 'penguins', 'optimizer': 'sgd', 'learning_rate': 0.01, 'epochs': 50, 'batch_size': 32, 'other_params': {'max_iter': 100}}\n[REGISTRY] Applied model config for logistic_regression\n[PARSED CONFIG]:\n{\n  \"framework\": \"scikit-learn\",\n  \"model\": \"logistic_regression\",\n  \"dataset\": \"penguins\",\n  \"optimizer\": \"sgd\",\n  \"learning_rate\": 0.01,\n  \"epochs\": 50,\n  \"batch_size\": 32,\n  \"other_params\": {\n    \"max_iter\": 100,\n    \"random_state\": 42,\n    \"C\": 1.0\n  },\n  \"model_config\": {\n    \"framework\": \"sklearn\",\n    \"class\": \"LogisticRegression\",\n    \"import\": \"from sklearn.linear_model import LogisticRegression\",\n    \"default_params\": {\n      \"random_state\": 42,\n      \"max_iter\": 1000,\n      \"C\": 1.0\n    }\n  }\n}\n[SCRIPT GENERATED]: outputs/train_logistic_regression_27fd13.py\n\u2705 numpy already installed.\n\u2705 pandas already installed.\n\u2705 seaborn already installed.\n\u2705 sklearn already installed.\n[EXECUTING] Running logistic_regression training...\nTraining logistic_regression on penguins for 50 epochs using scikit-learn...\nLoaded dataset from data/penguins.csv\nTraining set shape: (266, 6)\nTest set shape: (67, 6)\n\nTraining completed successfully!\nModel info saved to outputs/model_info_logistic_regression.json\n\n"
+    },
+    "svm": {
+      "status": "success",
+      "accuracy": 0.8806,
+      "training_time": 3.0634453296661377,
+      "framework": "sklearn",
+      "output": "[TRAIN] Received prompt: model: svm dataset: penguins epochs: 50\n[CONFIG] Extracting from prompt: model: svm dataset: penguins epochs: 50\n\u2705 LLM extracted config: {'framework': 'sklearn', 'model': 'svm', 'dataset': 'penguins', 'optimizer': None, 'learning_rate': None, 'epochs': 50, 'batch_size': 32, 'other_params': {'C': 1.0}}\n[REGISTRY] Applied model config for svm\n[PARSED CONFIG]:\n{\n  \"framework\": \"sklearn\",\n  \"model\": \"svm\",\n  \"dataset\": \"penguins\",\n  \"optimizer\": null,\n  \"learning_rate\": null,\n  \"epochs\": 50,\n  \"batch_size\": 32,\n  \"other_params\": {\n    \"C\": 1.0,\n    \"random_state\": 42,\n    \"gamma\": \"scale\"\n  },\n  \"model_config\": {\n    \"framework\": \"sklearn\",\n    \"class\": \"SVC\",\n    \"import\": \"from sklearn.svm import SVC\",\n    \"default_params\": {\n      \"random_state\": 42,\n      \"C\": 1.0,\n      \"gamma\": \"scale\"\n    }\n  }\n}\n[SCRIPT GENERATED]: outputs/train_svm_34b556.py\n\u2705 numpy already installed.\n\u2705 pandas already installed.\n\u2705 seaborn already installed.\n\u2705 sklearn already installed.\n[EXECUTING] Running svm training...\nTraining svm on penguins for 50 epochs using sklearn...\nLoaded dataset from data/penguins.csv\nTraining set shape: (266, 6)\nTest set shape: (67, 6)\nModel parameters: {'random_state': 42, 'C': 1.0, 'gamma': 'scale'}\nAccuracy: 0.8806\n\nClassification Report:\n              precision    recall  f1-score   support\n\n           0       0.91      0.86      0.89        36\n           1       0.85      0.90      0.88        31\n\n    accuracy                           0.88        67\n   macro avg       0.88      0.88      0.88        67\nweighted avg       0.88      0.88      0.88        67\n\n\nTraining completed successfully!\nModel info saved to outputs/model_info_svm.json\n\n"
+    },
+    "xgboost": {
+      "status": "success",
+      "accuracy": 0.8657,
+      "training_time": 3.3267383575439453,
+      "framework": "xgboost",
+      "output": "[TRAIN] Received prompt: model: xgboost dataset: penguins epochs: 50\n[CONFIG] Extracting from prompt: model: xgboost dataset: penguins epochs: 50\n\u2705 LLM extracted config: {'framework': 'xgboost', 'model': 'XGBClassifier', 'dataset': 'penguins', 'optimizer': 'adam', 'learning_rate': 0.01, 'epochs': 50, 'batch_size': 32, 'other_params': {'n_estimators': 100}}\n[REGISTRY] Applied model config for xgboost\n[PARSED CONFIG]:\n{\n  \"framework\": \"xgboost\",\n  \"model\": \"xgboost\",\n  \"dataset\": \"penguins\",\n  \"optimizer\": \"adam\",\n  \"learning_rate\": 0.01,\n  \"epochs\": 50,\n  \"batch_size\": 32,\n  \"other_params\": {\n    \"n_estimators\": 100,\n    \"max_depth\": 3,\n    \"learning_rate\": 0.1,\n    \"random_state\": 42\n  },\n  \"model_config\": {\n    \"framework\": \"xgboost\",\n    \"class\": \"XGBClassifier\",\n    \"import\": \"import xgboost as xgb\",\n    \"default_params\": {\n      \"max_depth\": 3,\n      \"learning_rate\": 0.1,\n      \"n_estimators\": 100,\n      \"random_state\": 42\n    }\n  }\n}\n[SCRIPT GENERATED]: outputs/train_xgboost_72fa2f.py\n\u2705 numpy already installed.\n\u2705 pandas already installed.\n\u2705 seaborn already installed.\n\u2705 sklearn already installed.\n\u2705 xgboost already installed.\n[EXECUTING] Running xgboost training...\nTraining xgboost on penguins for 50 epochs using xgboost...\nLoaded dataset from data/penguins.csv\nTraining set shape: (266, 6)\nTest set shape: (67, 6)\nXGBoost parameters: {'max_depth': 3, 'learning_rate': 0.01, 'n_estimators': 50, 'random_state': 42}\nAccuracy: 0.8657\n\nTraining completed successfully!\nModel info saved to outputs/model_info_xgboost.json\n\n"
+    },
+    "XGBClassifier": {
+      "status": "success",
+      "accuracy": 0.8358,
+      "training_time": 3.348912239074707,
+      "framework": "xgboost",
+      "output": "[TRAIN] Received prompt: model: XGBClassifier dataset: penguins epochs: 50\n[CONFIG] Extracting from prompt: model: XGBClassifier dataset: penguins epochs: 50\n\u2705 LLM extracted config: {'framework': 'xgboost', 'model': 'XGBClassifier', 'dataset': 'penguins', 'optimizer': 'adam', 'learning_rate': 0.001, 'epochs': 50, 'batch_size': 32, 'other_params': {'objective': 'reg:squarederror'}}\n[REGISTRY] Applied model config for xgboost\n[PARSED CONFIG]:\n{\n  \"framework\": \"xgboost\",\n  \"model\": \"xgboost\",\n  \"dataset\": \"penguins\",\n  \"optimizer\": \"adam\",\n  \"learning_rate\": 0.001,\n  \"epochs\": 50,\n  \"batch_size\": 32,\n  \"other_params\": {\n    \"objective\": \"reg:squarederror\",\n    \"max_depth\": 3,\n    \"learning_rate\": 0.1,\n    \"n_estimators\": 100,\n    \"random_state\": 42\n  },\n  \"model_config\": {\n    \"framework\": \"xgboost\",\n    \"class\": \"XGBClassifier\",\n    \"import\": \"import xgboost as xgb\",\n    \"default_params\": {\n      \"max_depth\": 3,\n      \"learning_rate\": 0.1,\n      \"n_estimators\": 100,\n      \"random_state\": 42\n    }\n  }\n}\n[SCRIPT GENERATED]: outputs/train_xgboost_e5183a.py\n\u2705 numpy already installed.\n\u2705 pandas already installed.\n\u2705 seaborn already installed.\n\u2705 sklearn already installed.\n\u2705 xgboost already installed.\n[EXECUTING] Running xgboost training...\nTraining xgboost on penguins for 50 epochs using xgboost...\nLoaded dataset from data/penguins.csv\nTraining set shape: (266, 6)\nTest set shape: (67, 6)\nXGBoost parameters: {'max_depth': 3, 'learning_rate': 0.001, 'n_estimators': 50, 'random_state': 42, 'objective': 'reg:squarederror'}\nAccuracy: 0.8358\n\nTraining completed successfully!\nModel info saved to outputs/model_info_xgboost.json\n\n"
+    }
+  },
+  "summary": {
+    "total_models": 5,
+    "successful_models": 5,
+    "best_model": "random_forest"
+  }
+}
