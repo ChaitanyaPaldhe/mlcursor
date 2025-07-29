@@ -1,4 +1,3 @@
-# llm_handler.py - Fixed version
 import subprocess
 import json
 import re
@@ -52,7 +51,6 @@ MODEL_REGISTRY = {
     "lightgbm": {
         "framework": "lightgbm",
         "class": "LGBMClassifier",
-        "class": "LightGBMClassifier", 
         "import": "import lightgbm as lgb",
         "default_params": {"n_estimators": 100, "learning_rate": 0.1, "random_state": 42}
     },
@@ -103,10 +101,10 @@ def query_ollama(prompt: str, model: str = "qwen2.5-coder:3b") -> str:
         )
         return result.stdout.decode().strip()
     except subprocess.CalledProcessError as e:
-        print("❌ Ollama error:", e.stderr.decode())
+        print("ERROR: Ollama error:", e.stderr.decode())
         return ""
     except FileNotFoundError:
-        print("❌ Ollama not found. Install ollama first: https://ollama.ai/")
+        print("ERROR: Ollama not found. Install ollama first: https://ollama.ai/")
         return ""
 
 def clean_llm_response(response: str) -> str:
@@ -141,6 +139,10 @@ Extract these details and respond ONLY with valid JSON:
     "learning_rate": 0.001,
     "epochs": 10,
     "batch_size": 32,
+    "task_type": "classification|regression|auto",
+    "use_cv": false,
+    "cv_folds": 5,
+    "cv_type": "auto|stratified|kfold",
     "other_params": {{
         "param_name": "param_value"
     }}
@@ -154,14 +156,14 @@ Respond only with JSON, no explanations:
     response = query_ollama(system_prompt, model)
     
     if not response:
-        print("⚠️ Ollama failed, falling back to regex parsing...")
+        print("WARNING: Ollama failed, falling back to regex parsing...")
         return extract_config_fallback(prompt)
     
     response = clean_llm_response(response)
     
     try:
         config = json.loads(response)
-        print(f"✅ LLM extracted config: {config}")
+        print(f"[SUCCESS] LLM extracted config: {config}")
         
         # Map common model names to registry keys
         model_name = config.get("model", "")
@@ -181,13 +183,13 @@ Respond only with JSON, no explanations:
         
         return config
     except json.JSONDecodeError as e:
-        print(f"⚠️ Failed to parse LLM response: {e}")
+        print(f"WARNING: Failed to parse LLM response: {e}")
         print(f"Raw response: {response}")
         print("Falling back to regex parsing...")
         return extract_config_fallback(prompt)
 
 def extract_config_fallback(prompt: str) -> dict:
-    """Fallback regex-based config extraction"""
+    """Fallback regex-based config extraction with CV support"""
     config = {
         "framework": None,
         "model": None,
@@ -196,8 +198,36 @@ def extract_config_fallback(prompt: str) -> dict:
         "learning_rate": 0.001,
         "epochs": 10,
         "batch_size": 32,
+        "task_type": "auto",
+        "use_cv": False,
+        "cv_folds": 5,
+        "cv_type": "auto",
         "other_params": {}
     }
+    
+    # Extract cross-validation settings
+    if re.search(r"\bcv\b|\bcross.?validation\b", prompt, re.IGNORECASE):
+        config["use_cv"] = True
+    
+    # Extract CV folds
+    cv_folds_match = re.search(r"(?:folds?|k.?fold):\s*(\d+)", prompt, re.IGNORECASE)
+    if not cv_folds_match:
+        cv_folds_match = re.search(r"(\d+).?fold", prompt, re.IGNORECASE)
+    if cv_folds_match:
+        config["cv_folds"] = int(cv_folds_match.group(1))
+        config["use_cv"] = True
+    
+    # Extract CV type
+    if re.search(r"stratified", prompt, re.IGNORECASE):
+        config["cv_type"] = "stratified"
+    elif re.search(r"kfold|k.fold", prompt, re.IGNORECASE):
+        config["cv_type"] = "kfold"
+    
+    # Extract task type
+    if re.search(r"regression", prompt, re.IGNORECASE):
+        config["task_type"] = "regression"
+    elif re.search(r"classification|classify", prompt, re.IGNORECASE):
+        config["task_type"] = "classification"
     
     # Extract model name (prioritize exact matches)
     # Handle common class name mappings
@@ -254,8 +284,8 @@ def extract_config_fallback(prompt: str) -> dict:
     
     return config
 
-def extract_config(prompt: str, use_ollama: bool = True, model: str = "qwen2.5-coder:3b") -> dict:
-    """Main config extraction function with hybrid approach"""
+def extract_config(prompt: str, use_ollama: bool = True, model: str = "qwen2.5-coder:3b", cv_config: dict = None) -> dict:
+    """Main config extraction function with hybrid approach and CV support"""
     
     print(f"[CONFIG] Extracting from prompt: {prompt}")
     
@@ -264,6 +294,15 @@ def extract_config(prompt: str, use_ollama: bool = True, model: str = "qwen2.5-c
         config = extract_config_with_ollama(prompt, model)
     else:
         config = extract_config_fallback(prompt)
+    
+    # Override with CLI CV configuration if provided (CLI takes precedence)
+    if cv_config:
+        print(f"[CV CONFIG] Applying CLI CV settings: {cv_config}")
+        config.update({
+            "use_cv": cv_config.get("use_cv", config.get("use_cv", False)),
+            "cv_folds": cv_config.get("cv_folds", config.get("cv_folds", 5)),
+            "cv_type": cv_config.get("cv_type", config.get("cv_type", "auto"))
+        })
     
     # Ensure other_params exists
     if "other_params" not in config:
@@ -294,10 +333,44 @@ def extract_config(prompt: str, use_ollama: bool = True, model: str = "qwen2.5-c
             print(f"[OVERRIDES] User parameters: {user_overrides}")
     
     else:
-        print(f"⚠️ Model '{config.get('model')}' not found in registry")
+        print(f"WARNING: Model '{config.get('model')}' not found in registry")
         print(f"Available models: {list(MODEL_REGISTRY.keys())}")
     
+    # Determine task type automatically if not specified
+    if config.get("task_type") == "auto":
+        config["task_type"] = determine_task_type(config.get("dataset"), prompt)
+    
+    print(f"[FINAL CONFIG] CV: {config.get('use_cv')}, Folds: {config.get('cv_folds')}, Type: {config.get('cv_type')}")
+    
     return config
+
+def determine_task_type(dataset: str, prompt: str) -> str:
+    """Automatically determine if task is classification or regression"""
+    
+    # Check prompt for explicit indicators
+    if re.search(r"regression|regress|predict.*value|continuous", prompt, re.IGNORECASE):
+        return "regression"
+    elif re.search(r"classification|classify|predict.*class|category", prompt, re.IGNORECASE):
+        return "classification"
+    
+    # Dataset-based heuristics
+    classification_datasets = {
+        "iris", "wine", "breast_cancer", "digits", "titanic", 
+        "mushroom", "heart", "spam", "adult", "sonar", "penguins"
+    }
+    
+    regression_datasets = {
+        "diabetes", "california_housing", "auto_mpg",
+        "housing", "concrete", "energy", "yacht"
+    }
+    
+    if dataset and dataset.lower() in classification_datasets:
+        return "classification"
+    elif dataset and dataset.lower() in regression_datasets:
+        return "regression"
+    
+    # Default to classification (most common ML task)
+    return "classification"
 
 def extract_parameter_overrides(prompt: str, param_names: List[str]) -> dict:
     """Extract user parameter overrides from prompt"""
@@ -350,11 +423,11 @@ def validate_model_config(config: dict) -> bool:
     
     for field in required_fields:
         if not config.get(field):
-            print(f"❌ Missing required field: {field}")
+            print(f"ERROR: Missing required field: {field}")
             return False
     
     if config["model"] not in MODEL_REGISTRY:
-        print(f"❌ Unknown model: {config['model']}")
+        print(f"ERROR: Unknown model: {config['model']}")
         return False
     
     return True

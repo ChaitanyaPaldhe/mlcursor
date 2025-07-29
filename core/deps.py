@@ -1,36 +1,83 @@
-# === File: core/deps.py ===
-import importlib.util
 import subprocess
 import sys
 import re
+import os
 
-def is_installed(pkg: str) -> bool:
-    """Check if a package is installed."""
-    return importlib.util.find_spec(pkg) is not None
-
-def install(pkg: str):
-    """Install the given package via pip."""
-    print(f"📦 Installing missing dependency: {pkg}")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+# Mapping of Python package names to pip package names
+PACKAGE_MAPPINGS = {
+    "sklearn": "scikit-learn",
+    "skimage": "scikit-image",
+    "cv2": "opencv-python",
+    "PIL": "Pillow",
+    "xgb": "xgboost",
+    "lgb": "lightgbm"
+}
 
 def ensure_script_dependencies(script_path: str):
     """Parse a Python script and install all missing imports."""
-    with open(script_path, "r") as f:
+    # Fix: Use UTF-8 encoding explicitly
+    with open(script_path, "r", encoding='utf-8') as f:
         code = f.read()
-
+    
     # Find import statements
     imports = re.findall(r"^\s*(?:import|from)\s+([a-zA-Z0-9_]+)", code, re.MULTILINE)
-
-    # Remove common standard libraries (optional)
-    stdlib_exclude = {
-        "os", "sys", "re", "json", "uuid", "time", "subprocess",
-        "typing", "math", "random", "datetime", "collections", "itertools"
+    
+    # Remove duplicates and standard library modules
+    stdlib_modules = {
+        "os", "sys", "re", "json", "time", "datetime", "math", "random",
+        "collections", "itertools", "functools", "pathlib", "uuid", "io",
+        "subprocess", "threading", "multiprocessing", "logging", "typing"
     }
+    
+    external_packages = set()
+    for pkg in imports:
+        if pkg not in stdlib_modules:
+            # Map to pip package name if needed
+            pip_name = PACKAGE_MAPPINGS.get(pkg, pkg)
+            external_packages.add(pip_name)
+    
+    if not external_packages:
+        print("✓ No external dependencies to install")
+        return
+    
+    print(f"📦 Checking dependencies: {', '.join(external_packages)}")
+    
+    # Check which packages are missing
+    missing_packages = []
+    for package in external_packages:
+        try:
+            __import__(package.replace('-', '_'))
+        except ImportError:
+            missing_packages.append(package)
+    
+    if missing_packages:
+        print(f"🔧 Installing missing packages: {', '.join(missing_packages)}")
+        
+        for package in missing_packages:
+            try:
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", package, "--quiet"
+                ])
+                print(f"✅ Installed {package}")
+            except subprocess.CalledProcessError as e:
+                print(f"⚠️ Failed to install {package}: {e}")
+    else:
+        print("✅ All dependencies are already installed")
 
-    unique_imports = sorted(set(imports) - stdlib_exclude)
+def install_package(package_name: str) -> bool:
+    """Install a single package using pip"""
+    try:
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", package_name, "--quiet"
+        ])
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
-    for pkg in unique_imports:
-        if not is_installed(pkg):
-            install(pkg)
-        else:
-            print(f"✅ {pkg} already installed.")
+def check_package_installed(package_name: str) -> bool:
+    """Check if a package is already installed"""
+    try:
+        __import__(package_name.replace('-', '_'))
+        return True
+    except ImportError:
+        return False
