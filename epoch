@@ -1,0 +1,89 @@
+#!/bin/bash
+# Epoch Interactive CLI Launcher Script
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Function to check if Python is available
+check_python() {
+    if command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+    elif command -v python &> /dev/null; then
+        PYTHON_CMD="python"
+    else
+        echo "❌ Python not found. Please install Python 3.6+ to use Epoch CLI"
+        exit 1
+    fi
+}
+
+# Function to check dependencies
+check_dependencies() {
+    echo "🔍 Checking dependencies..."
+    
+    # Check if interactive_cli.py exists
+    if [ ! -f "$SCRIPT_DIR/interactive_cli.py" ]; then
+        echo "❌ interactive_cli.py not found in $SCRIPT_DIR"
+        echo "Please ensure all Epoch CLI files are in the same directory"
+        exit 1
+    fi
+    
+    # Check if core modules exist
+    if [ ! -d "$SCRIPT_DIR/core" ]; then
+        echo "❌ core/ directory not found"
+        echo "Please ensure the core modules are available"
+        exit 1
+    fi
+    
+    echo "✅ Dependencies check passed"
+}
+
+# Function to show usage
+show_usage() {
+    echo "🤖 Epoch ML Toolkit Interactive CLI"
+    echo ""
+    echo "Usage:"
+    echo "  ./epoch               # Start interactive shell"
+    echo "  ./epoch -h            # Show this help"
+    echo "  ./epoch --version     # Show version"
+    echo ""
+    echo "For direct CLI commands, use:"
+    echo "  python cli.py --help"
+    echo ""
+    echo "Examples in interactive mode:"
+    echo "  epoch> train random_forest on iris"
+    echo "  epoch> tune xgboost on titanic with 100 trials"
+    echo "  epoch> compare sklearn models on wine with cv"
+    echo ""
+}
+
+# Function to start interactive CLI
+start_interactive() {
+    echo "🚀 Starting Epoch Interactive CLI..."
+    cd "$SCRIPT_DIR"
+    $PYTHON_CMD -c "
+import sys
+sys.path.insert(0, '.')
+from interactive_cli import EpochInteractiveCLI
+cli = EpochInteractiveCLI()
+cli.run()
+"
+}
+
+# Main script logic
+case "${1:-}" in
+    -h|--help)
+        show_usage
+        ;;
+    --version)
+        echo "Epoch CLI v1.0.0"
+        ;;
+    "")
+        check_python
+        check_dependencies
+        start_interactive
+        ;;
+    *)
+        echo "❓ Unknown option: $1"
+        show_usage
+        exit 1
+        ;;
+esac
