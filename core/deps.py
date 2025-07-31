@@ -32,9 +32,7 @@ def ensure_script_dependencies(script_path: str):
     external_packages = set()
     for pkg in imports:
         if pkg not in stdlib_modules:
-            # Map to pip package name if needed
-            pip_name = PACKAGE_MAPPINGS.get(pkg, pkg)
-            external_packages.add(pip_name)
+            external_packages.add(pkg)  # Keep the original import name
     
     if not external_packages:
         print("✓ No external dependencies to install")
@@ -46,9 +44,11 @@ def ensure_script_dependencies(script_path: str):
     missing_packages = []
     for package in external_packages:
         try:
-            __import__(package.replace('-', '_'))
+            __import__(package)  # Try to import with the actual Python import name
         except ImportError:
-            missing_packages.append(package)
+            # Map to pip package name if needed
+            pip_name = PACKAGE_MAPPINGS.get(package, package)
+            missing_packages.append(pip_name)
     
     if missing_packages:
         print(f"🔧 Installing missing packages: {', '.join(missing_packages)}")
@@ -77,7 +77,7 @@ def install_package(package_name: str) -> bool:
 def check_package_installed(package_name: str) -> bool:
     """Check if a package is already installed"""
     try:
-        __import__(package_name.replace('-', '_'))
+        __import__(package_name)  # Use the actual import name, not pip name
         return True
     except ImportError:
         return False

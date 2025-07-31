@@ -329,5 +329,274 @@ def benchmark(
     # Call the compare function directly
     compare(benchmark_prompt, models=",".join(all_models), save_results=True, use_cv=use_cv, cv_folds=cv_folds)
 
+app.command()
+def compare(
+    prompt: str,
+    models: Optional[str] = typer.Option(None, "--models", "-m", help="Models to compare (comma-separated)"),
+    framework: Optional[str] = typer.Option(None, "--framework", "-f", help="Compare all models from a specific framework"),
+    save_results: bool = typer.Option(True, "--save/--no-save", help="Save comparison results to file"),
+    use_cv: bool = typer.Option(False, "--cv/--no-cv", help="Use cross-validation for comparison"),
+    cv_folds: int = typer.Option(5, "--folds", "-k", help="Number of cross-validation folds"),
+    generate_viz: bool = typer.Option(True, "--viz/--no-viz", help="Generate comparison visualizations")
+):
+    """Compare multiple models on the same dataset with comprehensive visualizations."""
+    
+    # Determine which models to compare
+    if models:
+        model_list = [m.strip() for m in models.split(",")]
+    elif framework:
+        model_list = get_models_by_framework(framework)
+        if not model_list:
+            print(f"❌ No models found for framework: {framework}")
+            print(f"Available frameworks: {set(config['framework'] for config in MODEL_REGISTRY.values())}")
+            return
+    else:
+        # Default comparison set
+        model_list = ["random_forest", "xgboost", "lightgbm", "logistic_regression"]
+    
+    # Validate models
+    available_models = get_available_models()
+    invalid_models = [m for m in model_list if m not in available_models]
+    if invalid_models:
+        print(f"❌ Invalid models: {', '.join(invalid_models)}")
+        print(f"Available models: {', '.join(available_models)}")
+        return
+    
+    cv_suffix = f" ({cv_folds}-fold CV)" if use_cv else ""
+    print(f"🏁 Model Comparison: Testing {len(model_list)} models{cv_suffix}")
+    print(f"Models: {', '.join(model_list)}")
+    print(f"Prompt: {prompt}")
+    if generate_viz:
+        print(f"🎨 Visualizations: Enabled")
+    print()
+    
+    results = {}
+    detailed_results = {}
+    
+    # CV configuration
+    cv_config = {
+        "use_cv": use_cv,
+        "cv_folds": cv_folds,
+        "cv_type": "auto"
+    }
+    
+    for i, model in enumerate(model_list, 1):
+        print(f"\n[{i}/{len(model_list)}] Training {model}...")
+        
+        # Modify prompt to specify current model
+        if "model:" in prompt.lower():
+            # Replace existing model specification
+            model_prompt = re.sub(r'model:\s*\w+', f'model: {model}', prompt, flags=re.IGNORECASE)
+        else:
+            # Add model specification
+            model_prompt = f"model: {model} {prompt}"
+        
+        start_time = time.time()
+        
+        try:
+            # Capture output by redirecting stdout temporarily
+            old_stdout = sys.stdout
+            sys.stdout = captured_output = StringIO()
+            
+            train_from_prompt(model_prompt, cv_config=cv_config)
+            
+            sys.stdout = old_stdout
+            output = captured_output.getvalue()
+            
+            # Extract metrics from output
+            if use_cv:
+                accuracy, std_dev = extract_cv_metrics_from_output(output)
+                results[model] = {
+                    "status": "✅ Success",
+                    "accuracy": accuracy,
+                    "std_dev": std_dev,
+                    "time": f"{time.time() - start_time:.2f}s"
+                }
+                print(f"✅ {model}: {accuracy:.4f} ± {std_dev:.4f} accuracy")
+            else:
+                accuracy = extract_accuracy_from_output(output)
+                training_time = time.time() - start_time
+                results[model] = {
+                    "status": "✅ Success",
+                    "accuracy": accuracy,
+                    "time": f"{training_time:.2f}s"
+                }
+                print(f"✅ {model}: {accuracy:.4f} accuracy in {training_time:.2f}s")
+            
+            detailed_results[model] = {
+                "status": "success",
+                "accuracy": accuracy,
+                "std_dev": std_dev if use_cv else None,
+                "training_time": time.time() - start_time,
+                "framework": MODEL_REGISTRY[model]["framework"],
+                "output": output,
+                "cross_validation": use_cv,
+                "cv_folds": cv_folds if use_cv else None
+            }
+            
+        except Exception as e:
+            training_time = time.time() - start_time
+            results[model] = {
+                "status": f"❌ Failed: {str(e)[:50]}...",
+                "accuracy": 0.0,
+                "std_dev": 0.0 if use_cv else None,
+                "time": f"{training_time:.2f}s"
+            }
+            
+            detailed_results[model] = {
+                "status": "failed",
+                "error": str(e),
+                "training_time": training_time,
+                "framework": MODEL_REGISTRY[model]["framework"],
+                "cross_validation": use_cv
+            }
+            
+            print(f"❌ {model}: Failed - {str(e)[:50]}...")
+    
+    # Display results table
+    display_comparison_table(results, use_cv)
+    
+    # Generate comparison visualizations
+    if generate_viz:
+        print(f"\n🎨 Generating comparison visualizations...")
+        try:
+            sys.path.append('.')
+            from core.visualizer import create_comparison_visualizations
+            
+            viz_plots, visualizer = create_comparison_visualizations(results)
+            
+            if viz_plots:
+                print(f"✅ Generated {len(viz_plots)} comparison visualizations")
+                print(f"📁 Visualizations saved in: {visualizer.output_dir}")
+                
+                # Generate comparison report
+                comparison_info = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "prompt": prompt,
+                    "models_compared": model_list,
+                    "comparison_type": "cross_validation" if use_cv else "train_test_split",
+                    "cv_folds": cv_folds if use_cv else None,
+                    "results": detailed_results,
+                    "summary": {
+                        "total_models": len(model_list),
+                        "successful_models": len([r for r in detailed_results.values() if r["status"] == "success"]),
+                        "best_model": max(detailed_results.items(), key=lambda x: x[1].get("accuracy", 0))[0] if detailed_results else None,
+                        "frameworks_tested": list(set(MODEL_REGISTRY[m]["framework"] for m in model_list))
+                    }
+                }
+                
+                report_path = visualizer.generate_summary_report(
+                    comparison_info, viz_plots, "model_comparison"
+                )
+                print(f"📋 Comparison report: {report_path}")
+            else:
+                print("⚠️  No visualizations generated")
+                
+        except ImportError:
+            print("⚠️  Visualization module not available, skipping visualizations")
+        except Exception as e:
+            print(f"⚠️  Error generating visualizations: {e}")
+    
+    # Save results if requested
+    if save_results:
+        save_comparison_results(prompt, model_list, detailed_results)
+
+
+# Also add this enhanced benchmarking function
+
+@app.command()
+def benchmark(
+    dataset: str = typer.Argument(..., help="Dataset to benchmark on"),
+    frameworks: str = typer.Option("sklearn,xgboost", "--frameworks", "-f", help="Frameworks to include (comma-separated)"),
+    top_n: int = typer.Option(3, "--top", "-n", help="Number of top models per framework"),
+    use_cv: bool = typer.Option(True, "--cv/--no-cv", help="Use cross-validation for benchmarking"),
+    cv_folds: int = typer.Option(5, "--folds", "-k", help="Number of cross-validation folds"),
+    generate_viz: bool = typer.Option(True, "--viz/--no-viz", help="Generate comprehensive benchmark visualizations"),
+    save_models: bool = typer.Option(False, "--save-models/--no-save-models", help="Save trained models to disk")
+):
+    """Run a comprehensive benchmark across frameworks with detailed visualizations."""
+    
+    framework_list = [f.strip() for f in frameworks.split(",")]
+    
+    cv_suffix = f" with {cv_folds}-fold CV" if use_cv else ""
+    print(f"🏃‍♂️ Comprehensive Benchmark on {dataset} dataset{cv_suffix}")
+    print(f"Frameworks: {', '.join(framework_list)}")
+    print(f"Models per framework: {top_n}")
+    if generate_viz:
+        print(f"🎨 Comprehensive visualizations: Enabled")
+    print()
+    
+    all_models = []
+    framework_models = {}
+    
+    for fw in framework_list:
+        fw_models = get_models_by_framework(fw)[:top_n]  # Top N per framework
+        all_models.extend(fw_models)
+        framework_models[fw] = fw_models
+        print(f"📊 {fw.upper()}: {', '.join(fw_models)}")
+    
+    if not all_models:
+        print("❌ No models found for specified frameworks")
+        return
+    
+    print(f"\n🎯 Total models to benchmark: {len(all_models)}")
+    
+    # Run comparison with enhanced prompt
+    benchmark_prompt = f"dataset: {dataset} epochs: 100"
+    
+    # Call the enhanced compare function
+    compare(
+        benchmark_prompt, 
+        models=",".join(all_models), 
+        save_results=True, 
+        use_cv=use_cv, 
+        cv_folds=cv_folds,
+        generate_viz=generate_viz
+    )
+    
+    # Additional benchmark-specific analysis
+    if generate_viz and len(framework_list) > 1:
+        print(f"\n📈 Generating framework comparison analysis...")
+        try:
+            # Load the latest comparison results
+            import glob
+            result_files = glob.glob("outputs/comparison_*.json")
+            if result_files:
+                latest_file = max(result_files, key=os.path.getctime)
+                with open(latest_file, 'r', encoding='utf-8') as f:
+                    comparison_data = json.load(f)
+                
+                # Create framework-level summary
+                framework_summary = {}
+                for fw in framework_list:
+                    fw_results = [
+                        result for model, result in comparison_data["results"].items()
+                        if model in framework_models.get(fw, []) and result["status"] == "success"
+                    ]
+                    
+                    if fw_results:
+                        accuracies = [r["accuracy"] for r in fw_results]
+                        framework_summary[fw] = {
+                            "mean_accuracy": sum(accuracies) / len(accuracies),
+                            "best_accuracy": max(accuracies),
+                            "model_count": len(fw_results),
+                            "avg_time": sum(float(r["training_time"]) for r in fw_results) / len(fw_results)
+                        }
+                
+                print(f"\n🏆 Framework Performance Summary:")
+                for fw, summary in sorted(framework_summary.items(), 
+                                        key=lambda x: x[1]["mean_accuracy"], reverse=True):
+                    print(f"  {fw.upper()}:")
+                    print(f"    Mean Accuracy: {summary['mean_accuracy']:.4f}")
+                    print(f"    Best Accuracy: {summary['best_accuracy']:.4f}")
+                    print(f"    Models Tested: {summary['model_count']}")
+                    print(f"    Avg Time: {summary['avg_time']:.2f}s")
+                
+        except Exception as e:
+            print(f"⚠️  Error in framework analysis: {e}")
+    
+    print(f"\n🎉 Comprehensive benchmark completed!")
+    print(f"📁 Results and visualizations saved in outputs/ directory")
+
 if __name__ == "__main__":
     app()

@@ -1,0 +1,41 @@
+{
+  "timestamp": "20250731_165948",
+  "model_info": {
+    "model_name": "logistic_regression",
+    "framework": "sklearn",
+    "dataset": "penguins",
+    "task_type": "classification",
+    "cross_validation": {
+      "enabled": true,
+      "folds": 5,
+      "strategy": "auto"
+    },
+    "cv_results": {
+      "mean_score": 0.9041157847127996,
+      "std_score": 0.034440174499982414,
+      "individual_scores": [
+        0.8507462686567164,
+        0.8805970149253731,
+        0.9104477611940298,
+        0.9393939393939394,
+        0.9393939393939394
+      ],
+      "scoring_metric": "Accuracy"
+    }
+  },
+  "generated_plots": [
+    "outputs/visualizations\\logistic_regression_feature_importance_20250731_165948.png",
+    "outputs/visualizations\\logistic_regression_cv_scores_20250731_165948.png",
+    "outputs/visualizations\\logistic_regression_confusion_matrix_20250731_165948.png"
+  ],
+  "plot_descriptions": {
+    "confusion_matrix": "Shows classification accuracy per class",
+    "feature_importance": "Displays most influential features",
+    "cv_scores": "Cross-validation performance distribution",
+    "learning_curves": "Training progress over epochs",
+    "hyperparameter_importance": "Impact of different hyperparameters",
+    "optimization_history": "Hyperparameter tuning progress",
+    "model_comparison": "Performance comparison between models",
+    "regression_results": "Actual vs predicted values for regression"
+  }
+}

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Common imports (always needed)
 import pandas as pd
 import numpy as np
@@ -12,6 +11,18 @@ from sklearn.metrics import make_scorer
 {% else %}
 from sklearn.model_selection import train_test_split
 {% endif %}
+
+# Visualization imports
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from core.visualizer import create_visualizations
+    VISUALIZATIONS_AVAILABLE = True
+    print("🎨 Visualizations enabled")
+except ImportError as e:
+    VISUALIZATIONS_AVAILABLE = False
+    print(f"⚠️  Visualizations not available: {e}")
 
 # Framework-specific imports based on model config
 {% if framework == "sklearn" %}
@@ -529,41 +540,7 @@ else:
 {% endif %}
 
 {% elif framework == "pytorch" %}
-# PyTorch model building
-{% if model_config.architecture == "cnn" %}
-# CNN for tabular data (treating features as 1D sequence)
-class TabularCNN(nn.Module):
-    def __init__(self, input_size, output_size):
-        super().__init__()
-        self.conv1 = nn.Conv1d(1, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
-        self.pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(64, output_size)
-        
-        if task_type == "classification" and output_size == 1:
-            self.activation = nn.Sigmoid()
-        elif task_type == "classification":
-            self.activation = nn.Softmax(dim=1)
-        else:
-            self.activation = nn.Identity()
-        
-    def forward(self, x):
-        x = x.unsqueeze(1)  # Add channel dimension
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = self.pool(x)
-        x = x.squeeze(-1)
-        x = self.fc(x)
-        return self.activation(x)
-
-if task_type == "classification":
-    output_size = len(y.unique()) if len(y.unique()) > 2 else 1
-else:
-    output_size = 1
-
-model = TabularCNN(X.shape[1], output_size)
-{% else %}
-# Default MLP
+# PyTorch model building - simplified for template
 class MLP(nn.Module):
     def __init__(self, input_size, output_size):
         super().__init__()
@@ -594,8 +571,6 @@ else:
     output_size = 1
 
 model = MLP(X.shape[1], output_size)
-{% endif %}
-
 print(f"[SUCCESS] PyTorch model: {model}")
 
 # Loss and optimizer
@@ -607,7 +582,7 @@ if task_type == "classification":
 else:
     criterion = nn.MSELoss()
 
-optimizer = optim.Adam(model.parameters(), lr=lr)
+optimizer_torch = optim.Adam(model.parameters(), lr=lr)
 
 {% if use_cv %}
 # Manual cross-validation for PyTorch
@@ -635,12 +610,7 @@ for fold, (train_idx, val_idx) in enumerate(cv_strategy.split(X_array, y_array))
         y_val_tensor = torch.tensor(y_fold_val, dtype=torch.long if task_type == "classification" else torch.float32)
     
     # Create fold model
-    if task_type == "classification":
-        output_size_fold = len(np.unique(y_fold_train)) if len(np.unique(y_fold_train)) > 2 else 1
-    else:
-        output_size_fold = 1
-    
-    fold_model = MLP(X_fold_train.shape[1], output_size_fold)
+    fold_model = MLP(X_fold_train.shape[1], output_size)
     fold_optimizer = optim.Adam(fold_model.parameters(), lr=lr)
     
     # Training loop
@@ -658,7 +628,7 @@ for fold, (train_idx, val_idx) in enumerate(cv_strategy.split(X_array, y_array))
         val_output = fold_model(X_val_tensor)
         
         if task_type == "classification":
-            if output_size_fold == 1:
+            if output_size == 1:
                 val_pred = (val_output > 0.5).float()
                 fold_score = (val_pred.squeeze() == y_val_tensor.squeeze()).float().mean().item()
             else:
@@ -684,11 +654,11 @@ else:
 
 model.train()
 for epoch in range(epochs):
-    optimizer.zero_grad()
+    optimizer_torch.zero_grad()
     output = model(X_tensor)
     loss = criterion(output, y_tensor)
     loss.backward()
-    optimizer.step()
+    optimizer_torch.step()
     
     if (epoch + 1) % 10 == 0:
         print(f"Epoch {epoch+1}/{epochs}: Loss = {loss.item():.4f}")
@@ -715,11 +685,11 @@ model.train()
 for epoch in range(epochs):
     epoch_loss = 0
     for batch_idx, (data, target) in enumerate(dataloader):
-        optimizer.zero_grad()
+        optimizer_torch.zero_grad()
         output = model(data)
         loss = criterion(output, target)
         loss.backward()
-        optimizer.step()
+        optimizer_torch.step()
         epoch_loss += loss.item()
     
     avg_loss = epoch_loss / len(dataloader)
@@ -749,6 +719,61 @@ with torch.no_grad():
 
 print("\n[SUCCESS] Training completed successfully!")
 
+# ═══════════════════════════════════════════════════════════════
+# 🎨 VISUALIZATION GENERATION
+# ═══════════════════════════════════════════════════════════════
+
+if VISUALIZATIONS_AVAILABLE:
+    print("\n" + "="*60)
+    print("🎨 GENERATING VISUALIZATIONS")
+    print("="*60)
+    
+    try:
+        # Prepare CV scores if available
+        cv_scores_for_viz = cv_scores.tolist() if 'cv_scores' in locals() else None
+        
+        # Generate visualizations
+        saved_plots, visualizer = create_visualizations(
+            model=model,
+            X=X,
+            y=y,
+            model_name=model_name,
+            task_type=task_type,
+            cv_scores=cv_scores_for_viz
+        )
+        
+        # Generate summary report
+        model_info = {
+            "model_name": model_name,
+            "framework": "{{ framework }}",
+            "dataset": dataset,
+            "task_type": task_type,
+            "cross_validation": {
+                "enabled": use_cv,
+                "folds": cv_folds if use_cv else None,
+                "strategy": cv_type if use_cv else None
+            }
+        }
+        
+        if 'cv_scores' in locals():
+            model_info["cv_results"] = {
+                "mean_score": float(mean_score),
+                "std_score": float(std_score),
+                "individual_scores": cv_scores_for_viz,
+                "scoring_metric": scoring_name
+            }
+        
+        report_path = visualizer.generate_summary_report(model_info, saved_plots, model_name)
+        
+        print(f"\n✅ Visualization complete! Generated {len(saved_plots)} plots")
+        print(f"📁 Plots saved in: {visualizer.output_dir}")
+        print(f"📋 Summary report: {report_path}")
+        
+    except Exception as e:
+        print(f"⚠️  Error generating visualizations: {e}")
+        import traceback
+        traceback.print_exc()
+
 # Save model info and results
 import json
 import os
@@ -756,8 +781,8 @@ import os
 # Create outputs directory if it doesn't exist
 os.makedirs("outputs", exist_ok=True)
 
-# Prepare model info
-model_info = {
+# Prepare model info for JSON serialization
+model_info_json = {
     "model_name": model_name,
     "framework": "{{ framework }}",
     "dataset": dataset,
@@ -771,12 +796,13 @@ model_info = {
 
 {% if use_cv %}
 # Add CV results
-model_info["cv_results"] = {
-    "mean_score": float(mean_score),
-    "std_score": float(std_score),
-    "individual_scores": [float(score) for score in cv_scores] if 'cv_scores' in locals() else [],
-    "scoring_metric": scoring_name
-}
+if 'cv_scores' in locals():
+    model_info_json["cv_results"] = {
+        "mean_score": float(mean_score),
+        "std_score": float(std_score),
+        "individual_scores": [float(score) for score in cv_scores],
+        "scoring_metric": scoring_name
+    }
 {% endif %}
 
 {% if model_config %}
@@ -791,13 +817,13 @@ config_data = {
         {% endfor %}
     }
 }
-model_info["config"] = config_data
+model_info_json["config"] = config_data
 {% else %}
-model_info["config"] = None
+model_info_json["config"] = None
 {% endif %}
 
 # Add training parameters
-model_info["training_params"] = {
+model_info_json["training_params"] = {
     "learning_rate": lr,
     "epochs": epochs,
     "optimizer": optimizer,
@@ -810,6 +836,8 @@ model_info["training_params"] = {
 
 filename_suffix = "_cv" if use_cv else ""
 with open(f"outputs/model_info_{model_name}{filename_suffix}.json", "w", encoding='utf-8') as f:
-    json.dump(model_info, f, indent=2)
+    json.dump(model_info_json, f, indent=2)
 
-print(f"[SUCCESS] Model info saved to outputs/model_info_{model_name}{filename_suffix}.json")
+print(f"\n💾 Model info saved to outputs/model_info_{model_name}{filename_suffix}.json")
+
+print("\n🎉 Training and visualization pipeline completed successfully!")

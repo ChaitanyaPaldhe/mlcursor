@@ -1,7 +1,19 @@
 import optuna
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import accuracy_score
+import sys
+import os
+
+# Add visualization imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from core.visualizer import create_tuning_visualizations
+    VISUALIZATIONS_AVAILABLE = True
+    print("🎨 Tuning visualizations enabled")
+except ImportError as e:
+    VISUALIZATIONS_AVAILABLE = False
+    print(f"⚠️  Tuning visualizations not available: {e}")
 
 {% if config.framework == "xgboost" %}
 import xgboost as xgb
@@ -9,70 +21,300 @@ ModelClass = xgb.XGBClassifier
 {% elif config.framework == "lightgbm" %}
 import lightgbm as lgb
 ModelClass = lgb.LGBMClassifier
+{% elif config.framework == "catboost" %}
+from catboost import CatBoostClassifier
+ModelClass = CatBoostClassifier
 {% else %}
 from sklearn.ensemble import RandomForestClassifier
 ModelClass = RandomForestClassifier
 {% endif %}
 
+print(f"🔬 Starting hyperparameter optimization for {{ config.model }}")
+print(f"Framework: {{ config.framework }}")
+print(f"Dataset: {{ config.dataset }}")
+
 # Load dataset
 try:
     df = pd.read_csv("data/{{ config.dataset }}.csv")
+    print(f"[SUCCESS] Loaded dataset from data/{{ config.dataset }}.csv")
 except:
-    import seaborn as sns
-    df = sns.load_dataset("{{ config.dataset }}").dropna()
+    try:
+        import seaborn as sns
+        df = sns.load_dataset("{{ config.dataset }}").dropna()
+        print(f"[SUCCESS] Loaded {{ config.dataset }} from seaborn datasets")
+    except:
+        try:
+            from sklearn.datasets import load_iris, load_wine, load_breast_cancer, load_digits
+            dataset_loaders = {
+                'iris': load_iris,
+                'wine': load_wine,
+                'breast_cancer': load_breast_cancer,
+                'digits': load_digits
+            }
+            
+            if "{{ config.dataset }}".lower() in dataset_loaders:
+                sklearn_data = dataset_loaders["{{ config.dataset }}".lower()]()
+                df = pd.DataFrame(sklearn_data.data, columns=sklearn_data.feature_names if hasattr(sklearn_data, 'feature_names') else [f'feature_{i}' for i in range(sklearn_data.data.shape[1])])
+                df['target'] = sklearn_data.target
+                print(f"[SUCCESS] Loaded {{ config.dataset }} from sklearn datasets")
+            else:
+                print(f"[ERROR] Dataset '{{ config.dataset }}' not found")
+                exit(1)
+        except Exception as e3:
+            print(f"[ERROR] Error loading dataset: {e3}")
+            exit(1)
 
 # Drop rows with missing values
 df.dropna(inplace=True)
 
 # Encode categorical columns
-categoricals = df.select_dtypes(include=['object', 'category']).columns
-for col in categoricals:
-    df[col] = df[col].astype('category').cat.codes
-X = df.drop(columns=['target']) if 'target' in df.columns else df.iloc[:, :-1]
-y = df['target'] if 'target' in df.columns else df.iloc[:, -1]
+from sklearn.preprocessing import LabelEncoder
+label_encoders = {}
+for col in df.select_dtypes(include=['object', 'category']).columns:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col].astype(str))
+    label_encoders[col] = le
 
-from sklearn.model_selection import StratifiedKFold
+# Prepare features and target
+if 'target' in df.columns:
+    X = df.drop(columns=['target'])
+    y = df['target']
+else:
+    X = df.drop(columns=[df.columns[-1]])
+    y = df[df.columns[-1]]
 
+print(f"Dataset shape: {df.shape}")
+print(f"Features: {X.shape[1]}, Samples: {X.shape[0]}")
+print(f"Classes: {sorted(y.unique())}")
+
+# Use stratified cross-validation for robust evaluation
 skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 def objective(trial):
+    """Optuna objective function with framework-specific parameter spaces"""
+    
+    {% if config.framework == "xgboost" %}
     params = {
-        {% if config.framework in ["xgboost", "lightgbm"] %}
-        "n_estimators": trial.suggest_int("n_estimators", 50, 300),
-        "max_depth": trial.suggest_int("max_depth", 2, 10),
-        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
-        {% else %}
-        "n_estimators": trial.suggest_int("n_estimators", 50, 300),
-        "max_depth": trial.suggest_int("max_depth", 2, 10),
-        {% endif %}
-        "max_features": trial.suggest_categorical("max_features", [None, "sqrt", "log2"]),
-        "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 5),
-        "bootstrap": trial.suggest_categorical("bootstrap", [True, False])
+        "n_estimators": trial.suggest_int("n_estimators", 50, 500),
+        "max_depth": trial.suggest_int("max_depth", 3, 10),
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+        "random_state": 42
     }
+    
+    {% elif config.framework == "lightgbm" %}
+    params = {
+        "n_estimators": trial.suggest_int("n_estimators", 50, 500),
+        "max_depth": trial.suggest_int("max_depth", 3, 15),
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "num_leaves": trial.suggest_int("num_leaves", 10, 300),
+        "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+        "random_state": 42,
+        "verbosity": -1
+    }
+    
+    {% elif config.framework == "catboost" %}
+    params = {
+        "iterations": trial.suggest_int("iterations", 50, 500),
+        "depth": trial.suggest_int("depth", 4, 10),
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-8, 10.0, log=True),
+        "border_count": trial.suggest_int("border_count", 32, 255),
+        "random_seed": 42,
+        "verbose": False
+    }
+    
+    {% else %}
+    # Default: RandomForest parameters
+    params = {
+        "n_estimators": trial.suggest_int("n_estimators", 50, 500),
+        "max_depth": trial.suggest_int("max_depth", 3, 20),
+        "min_samples_split": trial.suggest_int("min_samples_split", 2, 20),
+        "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
+        "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
+        "bootstrap": trial.suggest_categorical("bootstrap", [True, False]),
+        "random_state": 42
+    }
+    {% endif %}
 
+    # Perform cross-validation
     scores = []
     for train_idx, valid_idx in skf.split(X, y):
         X_train, X_valid = X.iloc[train_idx], X.iloc[valid_idx]
         y_train, y_valid = y.iloc[train_idx], y.iloc[valid_idx]
 
-        model = RandomForestClassifier(**params)
+        model = ModelClass(**params)
         model.fit(X_train, y_train)
         preds = model.predict(X_valid)
         scores.append(accuracy_score(y_valid, preds))
 
     return sum(scores) / len(scores)
 
+# Create and run study
+print(f"\n🚀 Starting hyperparameter optimization...")
+print(f"Search space: {{ config.framework }}-specific parameters")
+print(f"Evaluation: 5-fold stratified cross-validation")
 
-    model = ModelClass(**params)
-    model.fit(X_train, y_train)
-    preds = model.predict(X_test)
-    acc = accuracy_score(y_test, preds)
-    return acc
+study = optuna.create_study(
+    direction="maximize",
+    study_name=f"{{ config.model }}_{{ config.dataset }}_optimization",
+    sampler=optuna.samplers.TPESampler(seed=42)
+)
 
+# Run optimization
+n_trials = {{ config.get('n_trials', 50) }}
+print(f"Running {n_trials} trials...")
 
+study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-study = optuna.create_study(direction="maximize")
-study.optimize(objective, n_trials=10)
+# Results
+print(f"\n🎯 Optimization Results:")
+print(f"Best trial: {study.best_trial.number}")
+print(f"Best accuracy: {study.best_value:.4f}")
+print(f"Best hyperparameters:")
+for key, value in study.best_params.items():
+    print(f"  {key}: {value}")
 
-print("Best hyperparameters:", study.best_params)
-print("Best accuracy:", study.best_value)
+# Train final model with best parameters
+print(f"\n🏆 Training final model with best parameters...")
+best_model = ModelClass(**study.best_params)
+best_model.fit(X, y)
+
+# Additional evaluation on holdout set
+X_train_final, X_test_final, y_train_final, y_test_final = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+best_model.fit(X_train_final, y_train_final)
+final_preds = best_model.predict(X_test_final)
+final_accuracy = accuracy_score(y_test_final, final_preds)
+
+print(f"Final holdout accuracy: {final_accuracy:.4f}")
+
+# ═══════════════════════════════════════════════════════════════
+# 🎨 TUNING VISUALIZATION GENERATION
+# ═══════════════════════════════════════════════════════════════
+
+if VISUALIZATIONS_AVAILABLE:
+    print("\n" + "="*60)
+    print("🎨 GENERATING TUNING VISUALIZATIONS")
+    print("="*60)
+    
+    try:
+        # Generate tuning-specific visualizations
+        saved_plots, visualizer = create_tuning_visualizations(
+            study=study,
+            model_name="{{ config.model }}"
+        )
+        
+        # Also generate model visualizations with the best model
+        from core.visualizer import create_visualizations
+        
+        model_plots, _ = create_visualizations(
+            model=best_model,
+            X=X,
+            y=y,
+            model_name=f"{{ config.model }}_optimized",
+            task_type="classification"
+        )
+        
+        saved_plots.extend(model_plots)
+        
+        # Generate summary report
+        tuning_info = {
+            "model_name": "{{ config.model }}",
+            "framework": "{{ config.framework }}",
+            "dataset": "{{ config.dataset }}",
+            "optimization": {
+                "n_trials": n_trials,
+                "best_trial": study.best_trial.number,
+                "best_score": float(study.best_value),
+                "best_params": study.best_params,
+                "final_holdout_accuracy": float(final_accuracy)
+            },
+            "search_space": {
+                {% if config.framework == "xgboost" %}
+                "n_estimators": "[50, 500]",
+                "max_depth": "[3, 10]", 
+                "learning_rate": "[0.01, 0.3] (log)",
+                "subsample": "[0.6, 1.0]",
+                "colsample_bytree": "[0.6, 1.0]",
+                "reg_alpha": "[1e-8, 10.0] (log)",
+                "reg_lambda": "[1e-8, 10.0] (log)"
+                {% elif config.framework == "lightgbm" %}
+                "n_estimators": "[50, 500]",
+                "max_depth": "[3, 15]",
+                "learning_rate": "[0.01, 0.3] (log)",
+                "num_leaves": "[10, 300]",
+                "subsample": "[0.6, 1.0]",
+                "colsample_bytree": "[0.6, 1.0]",
+                "reg_alpha": "[1e-8, 10.0] (log)",
+                "reg_lambda": "[1e-8, 10.0] (log)"
+                {% elif config.framework == "catboost" %}
+                "iterations": "[50, 500]",
+                "depth": "[4, 10]",
+                "learning_rate": "[0.01, 0.3] (log)",
+                "l2_leaf_reg": "[1e-8, 10.0] (log)",
+                "border_count": "[32, 255]"
+                {% else %}
+                "n_estimators": "[50, 500]",
+                "max_depth": "[3, 20]",
+                "min_samples_split": "[2, 20]",
+                "min_samples_leaf": "[1, 10]",
+                "max_features": "['sqrt', 'log2', None]",
+                "bootstrap": "[True, False]"
+                {% endif %}
+            }
+        }
+        
+        report_path = visualizer.generate_summary_report(
+            tuning_info, saved_plots, f"{{ config.model }}_tuning"
+        )
+        
+        print(f"\n✅ Tuning visualization complete! Generated {len(saved_plots)} plots")
+        print(f"📁 Plots saved in: {visualizer.output_dir}")
+        print(f"📋 Tuning report: {report_path}")
+        
+    except Exception as e:
+        print(f"⚠️  Error generating tuning visualizations: {e}")
+        import traceback
+        traceback.print_exc()
+
+# Save optimization results
+import json
+os.makedirs("outputs", exist_ok=True)
+
+optimization_results = {
+    "timestamp": pd.Timestamp.now().isoformat(),
+    "model": "{{ config.model }}",
+    "framework": "{{ config.framework }}",
+    "dataset": "{{ config.dataset }}",
+    "n_trials": n_trials,
+    "best_trial": study.best_trial.number,
+    "best_score": float(study.best_value),
+    "best_params": study.best_params,
+    "final_holdout_accuracy": float(final_accuracy),
+    "all_trials": [
+        {
+            "number": trial.number,
+            "value": trial.value,
+            "params": trial.params,
+            "state": str(trial.state)
+        }
+        for trial in study.trials
+    ]
+}
+
+with open(f"outputs/hpo_results_{{'{{'}}.model}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json", "w", encoding='utf-8') as f:
+    json.dump(optimization_results, f, indent=2)
+
+print(f"\n💾 Optimization results saved to outputs/")
+print(f"🎉 Hyperparameter optimization completed successfully!")
+print(f"🏆 Best accuracy: {study.best_value:.4f}")
+print(f"📊 Final holdout accuracy: {final_accuracy:.4f}")
