@@ -1,0 +1,33 @@
+{
+  "model_name": "lightgbm",
+  "framework": "pytorch|xgboost",
+  "dataset": "penguins",
+  "task_type": "classification",
+  "cross_validation": {
+    "enabled": false,
+    "folds": null,
+    "strategy": null
+  },
+  "config": {
+    "class": "LGBMClassifier",
+    "framework": "lightgbm",
+    "import": "import lightgbm as lgb",
+    "default_params": {
+      "n_estimators": 100,
+      "learning_rate": 0.1,
+      "random_state": 42
+    }
+  },
+  "training_params": {
+    "learning_rate": 0.01,
+    "epochs": 25,
+    "optimizer": "adam",
+    "other_params": {
+      "num_leaves": 31,
+      "min_data_in_leaf": 10,
+      "n_estimators": 100,
+      "learning_rate": 0.1,
+      "random_state": 42
+    }
+  }
+}

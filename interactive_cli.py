@@ -1,5 +1,5 @@
 """
-Interactive Epoch CLI - Natural Language ML Command Shell
+Fixed Interactive Epoch CLI - with improved dataset detection
 """
 import os
 import sys
@@ -36,21 +36,21 @@ class EpochInteractiveCLI:
         self.history_file = os.path.expanduser("~/.epoch_history")
         self.setup_readline()
         
-        # Command patterns for natural language parsing
+        # IMPROVED: More flexible command patterns
         self.command_patterns = {
             'train': [
-                r'train\s+(?:a\s+)?(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?',
-                r'(?:build|create|fit)\s+(?:a\s+)?(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?',
-                r'run\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?'
+                r'train\s+(?:a\s+|an\s+)?(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
+                r'(?:build|create|fit)\s+(?:a\s+|an\s+)?(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
+                r'run\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$'
             ],
             'tune': [
-                r'tune\s+(?:hyperparameters?\s+(?:for\s+)?)?(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?',
-                r'optimize\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?',
-                r'hpo\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?'
+                r'tune\s+(?:hyperparameters?\s+(?:for\s+)?|(?:a\s+|an\s+)?)?(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
+                r'optimize\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
+                r'hpo\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$'
             ],
             'compare': [
-                r'compare\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?',
-                r'benchmark\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?'
+                r'compare\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
+                r'benchmark\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$'
             ]
         }
         
@@ -61,8 +61,9 @@ class EpochInteractiveCLI:
         }
         
         # Command suggestions
+        available_models = get_available_models()
         self.suggestions = {
-            'models': list(get_available_models()),
+            'models': list(available_models),
             'datasets': list(self.known_datasets),
             'frameworks': list(set(config['framework'] for config in MODEL_REGISTRY.values())),
             'commands': ['train', 'tune', 'compare', 'benchmark', 'list', 'help', 'history', 'clear', 'exit']
@@ -173,7 +174,7 @@ class EpochInteractiveCLI:
         print("🎯 Train, tune, and compare ML models with natural language commands")
         print("📚 Type 'help' for available commands and examples")
         print("🔄 Use arrow keys for command history, Tab for auto-completion")
-        print("💡 Example: 'train a random forest on iris with 10-fold cv'")
+        print("💡 Example: 'train a random forest on penguins with 10-fold cv'")
         print("❌ Type 'exit' or 'quit' to leave")
         print("="*70 + "\n")
 
@@ -197,7 +198,7 @@ class EpochInteractiveCLI:
   exit / quit                              Exit the CLI
 
 🎯 NATURAL LANGUAGE EXAMPLES:
-  • train a random forest on iris
+  • train a random forest on penguins
   • tune xgboost on titanic with 100 trials
   • compare random_forest,xgboost,svm on wine with cv
   • benchmark iris with sklearn models
@@ -221,7 +222,7 @@ class EpochInteractiveCLI:
         print(help_text)
 
     def parse_natural_language(self, command: str) -> Tuple[str, Dict]:
-        """Parse natural language command into action and parameters"""
+        """IMPROVED: Parse natural language command into action and parameters"""
         command = command.strip().lower()
         
         # Handle simple commands first
@@ -257,84 +258,71 @@ class EpochInteractiveCLI:
         # If no pattern matches, try to extract key information
         return 'unknown', {'original_command': command}
 
-    def suggest_corrections(self, command: str) -> List[str]:
-        """Suggest corrections for unknown commands using fuzzy matching"""
-        suggestions = []
-        command_lower = command.lower()
-        
-        # Check for common typos and variations
-        typo_corrections = {
-            'trian': 'train', 'tarni': 'train', 'traing': 'train',
-            'optimzie': 'optimize', 'opitmize': 'optimize',
-            'comapre': 'compare', 'comprae': 'compare',
-            'benchamrk': 'benchmark', 'bencmark': 'benchmark',
-            'ramdom': 'random', 'forst': 'forest',
-            'xgbost': 'xgboost', 'xgboost': 'xgboost',
-            'lgbm': 'lightgbm', 'lightbgm': 'lightgbm'
-        }
-        
-        # Check for direct typo corrections
-        for typo, correction in typo_corrections.items():
-            if typo in command_lower:
-                corrected = command_lower.replace(typo, correction)
-                suggestions.append(corrected)
-        
-        # Simple fuzzy matching for commands
-        all_suggestions = (self.suggestions['commands'] + 
-                          self.suggestions['models'] + 
-                          self.suggestions['datasets'])
-        
-        for suggestion in all_suggestions:
-            # Check if suggestion is similar (simple edit distance)
-            if self.simple_similarity(command_lower, suggestion.lower()) > 0.6:
-                suggestions.append(suggestion)
-        
-        return list(set(suggestions))[:3]  # Return top 3 unique suggestions
-    
-    def simple_similarity(self, s1: str, s2: str) -> float:
-        """Calculate simple similarity between two strings"""
-        if not s1 or not s2:
-            return 0.0
-        
-        # Check for substring matches
-        if s1 in s2 or s2 in s1:
-            return 0.8
-        
-        # Simple character-based similarity
-        common_chars = set(s1) & set(s2)
-        total_chars = set(s1) | set(s2)
-        
-        if not total_chars:
-            return 0.0
-        
-        return len(common_chars) / len(total_chars)
     def extract_parameters(self, full_command: str, model_part: str, dataset_part: str, options_part: str) -> Dict:
-        """Extract parameters from command components"""
+        """IMPROVED: Extract parameters from command components with better dataset detection"""
         params = {}
         
         # Extract model
         if model_part:
             model_part = model_part.strip()
             # Remove articles and common words
-            model_part = re.sub(r'\b(a|an|the|model|classifier|regressor)\b', '', model_part).strip()
+            model_part = re.sub(r'\b(a|an|the|model|classifier|regressor)\b', '', model_part, flags=re.IGNORECASE).strip()
             model_part = re.sub(r'\s+', '_', model_part)  # Convert spaces to underscores
-            
-            # Try to match with available models
+
+            # Try to match with available models (fuzzy matching)
             available_models = get_available_models()
+            best_match = None
+            best_score = 0
+            
             for model in available_models:
-                if model.lower() in model_part.lower() or model_part.lower() in model.lower():
-                    params['model'] = model
+                # Exact match
+                if model.lower() == model_part.lower():
+                    best_match = model
+                    best_score = 1.0
                     break
+                # Partial match
+                elif model_part.lower() in model.lower() or model.lower() in model_part.lower():
+                    score = len(model_part) / max(len(model), len(model_part))
+                    if score > best_score:
+                        best_match = model
+                        best_score = score
+            
+            if best_match and best_score > 0.5:
+                params['model'] = best_match
             else:
-                # If no exact match, use the cleaned model part
+                # If no good match, use the cleaned model part
                 params['model'] = model_part
         
-        # Extract dataset
+        # IMPROVED: Extract dataset with better matching
         if dataset_part:
             dataset_part = dataset_part.strip()
-            # Remove common words
-            dataset_part = re.sub(r'\b(the|dataset|data)\b', '', dataset_part).strip()
-            params['dataset'] = dataset_part
+            # Remove common words but be more careful
+            dataset_part = re.sub(r'\b(the|dataset|data)\b', '', dataset_part, flags=re.IGNORECASE).strip()
+            # Remove extra whitespace
+            dataset_part = re.sub(r'\s+', ' ', dataset_part).strip()
+            
+            # Try to match with known datasets
+            best_match = None
+            best_score = 0
+            
+            for dataset in self.known_datasets:
+                # Exact match
+                if dataset.lower() == dataset_part.lower():
+                    best_match = dataset
+                    best_score = 1.0
+                    break
+                # Partial match
+                elif dataset_part.lower() in dataset.lower() or dataset.lower() in dataset_part.lower():
+                    score = len(dataset_part) / max(len(dataset), len(dataset_part))
+                    if score > best_score:
+                        best_match = dataset
+                        best_score = score
+            
+            if best_match and best_score >= 0.7:  # Higher threshold for datasets
+                params['dataset'] = best_match
+            else:
+                # Use the cleaned dataset part as-is
+                params['dataset'] = dataset_part
         
         # Extract cross-validation settings
         cv_match = re.search(r'(\d+)[-\s]*fold\s+(?:cv|cross.?validation)', full_command, re.IGNORECASE)
@@ -372,6 +360,62 @@ class EpochInteractiveCLI:
                 params['models'] = models
         
         return params
+
+    def validate_and_enhance_params(self, action: str, params: Dict) -> Dict:
+        """Validate parameters and prompt for missing required ones"""
+        enhanced_params = params.copy()
+        
+        if action in ['train', 'tune']:
+            # Check for required model
+            if not enhanced_params.get('model'):
+                print("🤔 No model specified.")
+                model = self.prompt_for_model()
+                if model:
+                    enhanced_params['model'] = model
+                else:
+                    print("❌ Model selection cancelled")
+                    return {}
+            
+            # Check for required dataset
+            if not enhanced_params.get('dataset'):
+                print("🤔 No dataset specified.")
+                dataset = self.prompt_for_dataset()
+                if dataset:
+                    enhanced_params['dataset'] = dataset
+                else:
+                    print("❌ Dataset selection cancelled")
+                    return {}
+                    
+            # Validate model exists ONLY if it's not already in available models
+            available_models = get_available_models()
+            if enhanced_params['model'] not in available_models:
+                print(f"⚠️  Model '{enhanced_params['model']}' not recognized.")
+                suggestions = [m for m in available_models if enhanced_params['model'].lower() in m.lower()]
+                if suggestions:
+                    print(f"💡 Similar models: {', '.join(suggestions[:3])}")
+                    choice = input("Use the first suggestion? (y/n): ").lower()
+                    if choice == 'y':
+                        enhanced_params['model'] = suggestions[0]
+                        print(f"✅ Using {suggestions[0]}")
+                    else:
+                        print("❌ Model validation failed")
+                        return {}
+                else:
+                    print("❌ No similar models found")
+                    return {}
+        
+        elif action == 'compare':
+            # Check for required dataset
+            if not enhanced_params.get('dataset'):
+                print("🤔 No dataset specified for comparison.")
+                dataset = self.prompt_for_dataset()
+                if dataset:
+                    enhanced_params['dataset'] = dataset
+                else:
+                    print("❌ Dataset selection cancelled")
+                    return {}
+        
+        return enhanced_params
 
     def handle_train_command(self, params: Dict):
         """Handle training commands"""
@@ -413,113 +457,87 @@ class EpochInteractiveCLI:
             print(f"❌ Training failed: {e}")
             print("💡 Check if the model and dataset names are correct")
 
-    def execute_command(self, action: str, params: Dict) -> bool:
-        """Execute the parsed command"""
+    def handle_tune_command(self, params: Dict):
+        """Handle hyperparameter tuning commands with validation"""
+        # Validate and enhance parameters
+        params = self.validate_and_enhance_params('tune', params)
+        if not params:
+            return
+            
+        model = params.get('model')
+        dataset = params.get('dataset')
+        n_trials = params.get('n_trials', 50)
+        
+        # Build prompt for existing tune function
+        prompt = f"model: {model} dataset: {dataset} n_trials: {n_trials}"
+        
+        print(f"🔬 Optimizing {model} hyperparameters on {dataset} ({n_trials} trials)")
+        
+        # Update session data
+        self.session_data['models_used'].add(model)
+        self.session_data['datasets_used'].add(dataset)
+        self.session_data['last_model'] = model
+        self.session_data['last_dataset'] = dataset
+        self.session_data['command_count'] += 1
+        
+        # Call existing tune function
         try:
-            if action == 'help':
-                self.print_help()
-            
-            elif action == 'exit':
-                return False
-            
-            elif action == 'clear':
-                os.system('clear' if os.name == 'posix' else 'cls')
-            
-            elif action == 'history':
-                self.show_history()
-            
-            elif action == 'list':
-                self.handle_list_command(params.get('args', []))
-            
-            elif action == 'train':
-                self.handle_train_command(params)
-            
-            elif action == 'tune':
-                self.handle_tune_command(params)
-            
-            elif action == 'compare':
-                self.handle_compare_command(params)
-            
-            elif action == 'unknown':
-                original_cmd = params.get('original_command', '')
-                print(f"❓ Couldn't understand command: '{original_cmd}'")
-                
-                # Try to suggest corrections
-                suggestions = self.suggest_corrections(original_cmd)
-                if suggestions:
-                    print("💡 Did you mean:")
-                    for i, suggestion in enumerate(suggestions, 1):
-                        print(f"  {i}. {suggestion}")
-                    
-                    # Allow user to select a suggestion
-                    try:
-                        choice = input("Select a suggestion (1-{}) or press Enter to skip: ".format(len(suggestions)))
-                        if choice.isdigit() and 1 <= int(choice) <= len(suggestions):
-                            corrected_command = suggestions[int(choice) - 1]
-                            print(f"🔄 Executing: {corrected_command}")
-                            action, params = self.parse_natural_language(corrected_command)
-                            return self.execute_command(action, params)
-                    except (ValueError, KeyboardInterrupt):
-                        pass
-                
-                print("💡 Type 'help' for available commands and examples")
-            
-            else:
-                print(f"⚠️  Command '{action}' not implemented yet")
-            
-            return True
-            
+            tune_from_prompt(prompt)
         except Exception as e:
-            print(f"❌ Error executing command: {e}")
-            return True
+            print(f"❌ Tuning failed: {e}")
+            print("💡 Check if the model and dataset names are correct")
 
-    def validate_and_enhance_params(self, action: str, params: Dict) -> Dict:
-        """Validate parameters and prompt for missing required ones"""
-        enhanced_params = params.copy()
-        
-        if action in ['train', 'tune']:
-            # Check for required model
-            if not enhanced_params.get('model'):
-                print("🤔 No model specified.")
-                model = self.prompt_for_model()
-                if model:
-                    enhanced_params['model'] = model
-                else:
-                    return {}
+    def handle_compare_command(self, params: Dict):
+        """Handle model comparison commands with validation"""
+        # Validate and enhance parameters
+        params = self.validate_and_enhance_params('compare', params)
+        if not params:
+            return
             
-            # Check for required dataset
-            if not enhanced_params.get('dataset'):
-                print("🤔 No dataset specified.")
-                dataset = self.prompt_for_dataset()
-                if dataset:
-                    enhanced_params['dataset'] = dataset
-                else:
-                    return {}
-                    
-            # Validate model exists
-            available_models = get_available_models()
-            if enhanced_params['model'] not in available_models:
-                print(f"⚠️  Model '{enhanced_params['model']}' not recognized.")
-                suggestions = [m for m in available_models if enhanced_params['model'].lower() in m.lower()]
-                if suggestions:
-                    print(f"💡 Similar models: {', '.join(suggestions[:3])}")
-                    choice = input("Use one of these? (y/n): ").lower()
-                    if choice == 'y':
-                        enhanced_params['model'] = suggestions[0]
-                        print(f"✅ Using {suggestions[0]}")
+        models = params.get('models', [])
+        dataset = params.get('dataset')
+        framework = params.get('framework')
         
-        elif action == 'compare':
-            # Check for required dataset
-            if not enhanced_params.get('dataset'):
-                print("🤔 No dataset specified for comparison.")
-                dataset = self.prompt_for_dataset()
-                if dataset:
-                    enhanced_params['dataset'] = dataset
-                else:
-                    return {}
+        if not models and not framework:
+            # Use default comparison models
+            models = ['random_forest', 'xgboost', 'lightgbm', 'logistic_regression']
+            print(f"🏁 Using default models for comparison: {', '.join(models)}")
         
-        return enhanced_params
-    
+        # Import and call compare function from cli.py
+        try:
+            from cli import compare
+            
+            prompt = f"dataset: {dataset}"
+            
+            # Set up arguments
+            kwargs = {
+                'prompt': prompt,
+                'models': ','.join(models) if models else None,
+                'framework': framework,
+                'save_results': True,
+                'use_cv': params.get('use_cv', False),
+                'cv_folds': params.get('cv_folds', 5),
+                'generate_viz': True
+            }
+            
+            print(f"🏁 Comparing models on {dataset}")
+            if params.get('use_cv'):
+                print(f"📊 Using {params.get('cv_folds', 5)}-fold cross-validation")
+            
+            # Update session data
+            if models:
+                self.session_data['models_used'].update(models)
+            self.session_data['datasets_used'].add(dataset)
+            self.session_data['last_dataset'] = dataset
+            self.session_data['command_count'] += 1
+            
+            compare(**kwargs)
+            
+        except ImportError:
+            print("❌ Compare function not available")
+        except Exception as e:
+            print(f"❌ Comparison failed: {e}")
+
     def prompt_for_model(self) -> Optional[str]:
         """Interactive model selection"""
         available_models = get_available_models()
@@ -586,118 +604,119 @@ class EpochInteractiveCLI:
             pass
         
         return None
-        """Handle training commands"""
-        model = params.get('model')
-        dataset = params.get('dataset')
-        
-        if not model:
-            print("❌ No model specified. Example: 'train random_forest on iris'")
-            return
-        
-        if not dataset:
-            print("❌ No dataset specified. Example: 'train random_forest on iris'")
-            return
-        
-        # Build prompt for existing train function
-        prompt = f"model: {model} dataset: {dataset}"
-        
-        # Add CV configuration
-        cv_config = {}
-        if params.get('use_cv'):
-            cv_config['use_cv'] = True
-            cv_config['cv_folds'] = params.get('cv_folds', 5)
-            cv_config['cv_type'] = params.get('cv_type', 'auto')
-            
-            cv_info = f" with {cv_config['cv_folds']}-fold CV"
-            print(f"🎯 Training {model} on {dataset}{cv_info}")
-        else:
-            cv_config['use_cv'] = False
-            print(f"🎯 Training {model} on {dataset}")
-        
-        # Update session data
-        self.session_data['models_used'].add(model)
-        self.session_data['datasets_used'].add(dataset)
-        self.session_data['last_model'] = model
-        self.session_data['last_dataset'] = dataset
-        self.session_data['command_count'] += 1
-        
-        # Call existing train function
-        train_from_prompt(prompt, cv_config=cv_config)
 
-    def handle_tune_command(self, params: Dict):
-        """Handle hyperparameter tuning commands with validation"""
-        # Validate and enhance parameters
-        params = self.validate_and_enhance_params('tune', params)
-        if not params:
-            return
-            
-        model = params.get('model')
-        dataset = params.get('dataset')
-        n_trials = params.get('n_trials', 50)
-        
-        # Build prompt for existing tune function
-        prompt = f"model: {model} dataset: {dataset} n_trials: {n_trials}"
-        
-        print(f"🔬 Optimizing {model} hyperparameters on {dataset} ({n_trials} trials)")
-        
-        # Update session data
-        self.session_data['models_used'].add(model)
-        self.session_data['datasets_used'].add(dataset)
-        self.session_data['last_model'] = model
-        self.session_data['last_dataset'] = dataset
-        self.session_data['command_count'] += 1
-        
-        # Call existing tune function
-        tune_from_prompt(prompt)
-
-    def handle_compare_command(self, params: Dict):
-        """Handle model comparison commands with validation"""
-        # Validate and enhance parameters
-        params = self.validate_and_enhance_params('compare', params)
-        if not params:
-            return
-            
-        models = params.get('models', [])
-        dataset = params.get('dataset')
-        framework = params.get('framework')
-        
-        if not models and not framework:
-            # Use default comparison models
-            models = ['random_forest', 'xgboost', 'lightgbm', 'logistic_regression']
-            print(f"🏁 Using default models for comparison: {', '.join(models)}")
-        
-        # Import and call compare function from cli.py
+    def execute_command(self, action: str, params: Dict) -> bool:
+        """Execute the parsed command"""
         try:
-            from cli import compare
+            if action == 'help':
+                self.print_help()
             
-            prompt = f"dataset: {dataset}"
+            elif action == 'exit':
+                return False
             
-            # Set up arguments
-            kwargs = {
-                'prompt': prompt,
-                'models': ','.join(models) if models else None,
-                'framework': framework,
-                'save_results': True,
-                'use_cv': params.get('use_cv', False),
-                'cv_folds': params.get('cv_folds', 5),
-                'generate_viz': True
-            }
+            elif action == 'clear':
+                os.system('clear' if os.name == 'posix' else 'cls')
             
-            print(f"🏁 Comparing models on {dataset}")
-            if params.get('use_cv'):
-                print(f"📊 Using {params.get('cv_folds', 5)}-fold cross-validation")
+            elif action == 'history':
+                self.show_history()
             
-            # Update session data
-            if models:
-                self.session_data['models_used'].update(models)
-            self.session_data['datasets_used'].add(dataset)
-            self.session_data['last_dataset'] = dataset
-            self.session_data['command_count'] += 1
+            elif action == 'list':
+                self.handle_list_command(params.get('args', []))
             
-            compare(**kwargs)
+            elif action == 'train':
+                self.handle_train_command(params)
             
-        except ImportError:
-            print("❌ Compare function not available")
+            elif action == 'tune':
+                self.handle_tune_command(params)
+            
+            elif action == 'compare':
+                self.handle_compare_command(params)
+            
+            elif action == 'unknown':
+                original_cmd = params.get('original_command', '')
+                print(f"❓ Couldn't understand command: '{original_cmd}'")
+                
+                # Try to suggest corrections
+                suggestions = self.suggest_corrections(original_cmd)
+                if suggestions:
+                    print("💡 Did you mean:")
+                    for i, suggestion in enumerate(suggestions, 1):
+                        print(f"  {i}. {suggestion}")
+                    
+                    # Allow user to select a suggestion
+                    try:
+                        choice = input("Select a suggestion (1-{}) or press Enter to skip: ".format(len(suggestions)))
+                        if choice.isdigit() and 1 <= int(choice) <= len(suggestions):
+                            corrected_command = suggestions[int(choice) - 1]
+                            print(f"🔄 Executing: {corrected_command}")
+                            action, params = self.parse_natural_language(corrected_command)
+                            return self.execute_command(action, params)
+                    except (ValueError, KeyboardInterrupt):
+                        pass
+                
+                print("💡 Type 'help' for available commands and examples")
+            
+            else:
+                print(f"⚠️  Command '{action}' not implemented yet")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error executing command: {e}")
+            return True
+
+    def suggest_corrections(self, command: str) -> List[str]:
+        """Suggest corrections for unknown commands using fuzzy matching"""
+        suggestions = []
+        command_lower = command.lower()
+        
+        # Check for common typos and variations
+        typo_corrections = {
+            'trian': 'train', 'tarni': 'train', 'traing': 'train',
+            'optimzie': 'optimize', 'opitmize': 'optimize',
+            'comapre': 'compare', 'comprae': 'compare',
+            'benchamrk': 'benchmark', 'bencmark': 'benchmark',
+            'ramdom': 'random', 'forst': 'forest',
+            'xgbost': 'xgboost', 'xgboost': 'xgboost',
+            'lgbm': 'lightgbm', 'lightbgm': 'lightgbm',
+            'penquin': 'penguins', 'penguin': 'penguins'
+        }
+        
+        # Check for direct typo corrections
+        for typo, correction in typo_corrections.items():
+            if typo in command_lower:
+                corrected = command_lower.replace(typo, correction)
+                suggestions.append(corrected)
+        
+        # Simple fuzzy matching for commands
+        all_suggestions = (self.suggestions['commands'] + 
+                          self.suggestions['models'] + 
+                          self.suggestions['datasets'])
+        
+        for suggestion in all_suggestions:
+            # Check if suggestion is similar (simple edit distance)
+            if self.simple_similarity(command_lower, suggestion.lower()) > 0.6:
+                suggestions.append(suggestion)
+        
+        return list(set(suggestions))[:3]  # Return top 3 unique suggestions
+    
+    def simple_similarity(self, s1: str, s2: str) -> float:
+        """Calculate simple similarity between two strings"""
+        if not s1 or not s2:
+            return 0.0
+        
+        # Check for substring matches
+        if s1 in s2 or s2 in s1:
+            return 0.8
+        
+        # Simple character-based similarity
+        common_chars = set(s1) & set(s2)
+        total_chars = set(s1) | set(s2)
+        
+        if not total_chars:
+            return 0.0
+        
+        return len(common_chars) / len(total_chars)
 
     def handle_list_command(self, args: List[str]):
         """Handle list commands"""
