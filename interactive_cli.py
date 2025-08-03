@@ -308,6 +308,7 @@ class EpochInteractiveCLI:
             return 0.0
         
         return len(common_chars) / len(total_chars)
+    def extract_parameters(self, full_command: str, model_part: str, dataset_part: str, options_part: str) -> Dict:
         """Extract parameters from command components"""
         params = {}
         
@@ -371,6 +372,46 @@ class EpochInteractiveCLI:
                 params['models'] = models
         
         return params
+
+    def handle_train_command(self, params: Dict):
+        """Handle training commands"""
+        # Validate and enhance parameters first
+        params = self.validate_and_enhance_params('train', params)
+        if not params:
+            return
+            
+        model = params.get('model')
+        dataset = params.get('dataset')
+        
+        # Build prompt for existing train function
+        prompt = f"model: {model} dataset: {dataset}"
+        
+        # Add CV configuration
+        cv_config = {}
+        if params.get('use_cv'):
+            cv_config['use_cv'] = True
+            cv_config['cv_folds'] = params.get('cv_folds', 5)
+            cv_config['cv_type'] = params.get('cv_type', 'auto')
+            
+            cv_info = f" with {cv_config['cv_folds']}-fold CV"
+            print(f"🎯 Training {model} on {dataset}{cv_info}")
+        else:
+            cv_config['use_cv'] = False
+            print(f"🎯 Training {model} on {dataset}")
+        
+        # Update session data
+        self.session_data['models_used'].add(model)
+        self.session_data['datasets_used'].add(dataset)
+        self.session_data['last_model'] = model
+        self.session_data['last_dataset'] = dataset
+        self.session_data['command_count'] += 1
+        
+        # Call existing train function
+        try:
+            train_from_prompt(prompt, cv_config=cv_config)
+        except Exception as e:
+            print(f"❌ Training failed: {e}")
+            print("💡 Check if the model and dataset names are correct")
 
     def execute_command(self, action: str, params: Dict) -> bool:
         """Execute the parsed command"""
