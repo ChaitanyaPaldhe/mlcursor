@@ -6,8 +6,7 @@ from sklearn.metrics import accuracy_score, classification_report, mean_squared_
 
 # Cross-validation imports
 
-from sklearn.model_selection import StratifiedKFold, KFold, cross_val_score, cross_validate
-from sklearn.metrics import make_scorer
+from sklearn.model_selection import train_test_split
 
 
 # Visualization imports
@@ -24,17 +23,17 @@ except ImportError as e:
 
 # Framework-specific imports based on model config
 
-import lightgbm as lgb
+from sklearn.ensemble import RandomForestClassifier
 
 
 # Config from prompt
-model_name = "lightgbm"
+model_name = "random_forest"
 dataset = "penguins"
 optimizer = "adam"
-lr = 0.1
-epochs = 25
-task_type = "regression"
-use_cv = True
+lr = 0.001
+epochs = 10
+task_type = "classification"
+use_cv = False
 cv_folds = 5
 cv_type = "auto"
 
@@ -119,29 +118,10 @@ else:
 
 # Cross-validation setup
 
-# Determine CV strategy
-if cv_type == "auto":
-    if task_type == "classification":
-        cv_strategy = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
-        print(f"[SUCCESS] Using StratifiedKFold with {cv_folds} folds")
-    else:
-        cv_strategy = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
-        print(f"[SUCCESS] Using KFold with {cv_folds} folds")
-elif cv_type == "stratified":
-    cv_strategy = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
-    print(f"[SUCCESS] Using StratifiedKFold with {cv_folds} folds")
-else:  # kfold
-    cv_strategy = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
-    print(f"[SUCCESS] Using KFold with {cv_folds} folds")
-
-# Define scoring metric
-if task_type == "classification":
-    scoring = 'accuracy'
-    scoring_name = "Accuracy"
-else:
-    scoring = 'neg_mean_squared_error'
-    scoring_name = "Negative MSE"
-
+# Traditional train/test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, 
+                                                   stratify=y if task_type == "classification" else None)
+print(f"[SUCCESS] Train/test split: {X_train.shape[0]} train, {X_test.shape[0]} test samples")
 
 
 # Training based on framework and model
@@ -152,69 +132,51 @@ model_params = {}
 
 model_params["n_estimators"] = 100
 
-model_params["learning_rate"] = 0.1
-
 model_params["random_state"] = 42
+
+model_params["max_depth"] = None
 
 
 # Apply user overrides
-
-
-
-
 
 
 model_params["n_estimators"] = 100
 
 
 
-model_params["learning_rate"] = 0.1
-
-
-
 model_params["random_state"] = 42
 
 
 
+model_params["max_depth"] = None
+
+
+
 print(f"[SUCCESS] Model parameters: {model_params}")
-model = LGBMClassifier(**model_params)
+model = RandomForestClassifier(**model_params)
 
 
 
-# Cross-validation training
-print(f"\n[INFO] Starting {cv_folds}-fold cross-validation...")
+# Traditional training
+model.fit(X_train, y_train)
 
-# Perform cross-validation
-cv_scores = cross_val_score(model, X, y, cv=cv_strategy, scoring=scoring, n_jobs=-1)
+# Predictions and evaluation
+y_pred = model.predict(X_test)
 
-# Convert negative MSE back to positive for regression
-if task_type == "regression" and scoring == 'neg_mean_squared_error':
-    cv_scores = -cv_scores
-    scoring_name = "MSE"
-
-mean_score = cv_scores.mean()
-std_score = cv_scores.std()
-
-print(f"\n[RESULTS] Cross-Validation Results:")
-print(f"Individual fold scores: {[f'{score:.4f}' for score in cv_scores]}")
-print(f"Mean CV {scoring_name}: {mean_score:.4f} ± {std_score:.4f}")
-
-# Also get additional metrics
 if task_type == "classification":
-    cv_results = cross_validate(model, X, y, cv=cv_strategy, 
-                               scoring=['accuracy', 'precision_macro', 'recall_macro', 'f1_macro'],
-                               n_jobs=-1)
-    
-    print(f"\n[METRICS] Additional CV Metrics:")
-    for metric, scores in cv_results.items():
-        if metric.startswith('test_'):
-            metric_name = metric.replace('test_', '').replace('_', ' ').title()
-            print(f"{metric_name}: {scores.mean():.4f} ± {scores.std():.4f}")
-
-# Train on full dataset for final model
-print(f"\n[INFO] Training final model on full dataset...")
-model.fit(X, y)
-
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"\n[RESULTS] Results:")
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"\n[REPORT] Classification Report:")
+    print(classification_report(y_test, y_pred))
+else:
+    mse = mean_squared_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+    rmse = np.sqrt(mse)
+    print(f"\n[RESULTS] Results:")
+    print(f"MSE: {mse:.4f}")
+    print(f"RMSE: {rmse:.4f}")
+    print(f"R²: {r2:.4f}")
 
 
 
@@ -297,29 +259,20 @@ model_info_json = {
 }
 
 
-# Add CV results
-if 'cv_scores' in locals():
-    model_info_json["cv_results"] = {
-        "mean_score": float(mean_score),
-        "std_score": float(std_score),
-        "individual_scores": [float(score) for score in cv_scores],
-        "scoring_metric": scoring_name
-    }
-
 
 
 # Add model config if available
 config_data = {
-    "class": "LGBMClassifier",
-    "framework": "lightgbm",
-    "import": "import lightgbm as lgb",
+    "class": "RandomForestClassifier",
+    "framework": "sklearn",
+    "import": "from sklearn.ensemble import RandomForestClassifier",
     "default_params": {
         
         "n_estimators": 100,
         
-        "learning_rate": 0.1,
-        
         "random_state": 42,
+        
+        "max_depth": None,
         
     }
 }
@@ -333,15 +286,11 @@ model_info_json["training_params"] = {
     "optimizer": optimizer,
     "other_params": {
         
-        "num_leaves": 31,
-        
-        "objective": "rmse",
-        
         "n_estimators": 100,
         
-        "learning_rate": 0.1,
-        
         "random_state": 42,
+        
+        "max_depth": None,
         
     }
 }
@@ -351,5 +300,47 @@ with open(f"outputs/model_info_{model_name}{filename_suffix}.json", "w", encodin
     json.dump(model_info_json, f, indent=2)
 
 print(f"\n💾 Model info saved to outputs/model_info_{model_name}{filename_suffix}.json")
+
+# ═══════════════════════════════════════════════════════════════
+# 💾 MODEL SAVING FOR DEPLOYMENT
+# ═══════════════════════════════════════════════════════════════
+
+print("\n💾 Saving model for deployment...")
+
+import pickle
+import joblib
+from datetime import datetime
+
+# Create models directory
+os.makedirs("outputs/models", exist_ok=True)
+
+# Generate model filename
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+cv_suffix = "_cv" if use_cv else ""
+model_filename = f"{model_name}_{dataset}{cv_suffix}_{timestamp}"
+
+try:
+    
+    # Save sklearn-compatible models
+    model_path = f"outputs/models/{model_filename}.pkl"
+    joblib.dump(model, model_path)
+    print(f"✅ Model saved: {model_path}")
+    
+    
+    
+    # Save preprocessing components if they exist
+    
+    
+    if label_encoders:
+        encoders_path = f"outputs/models/{model_filename}_encoders.pkl"
+        joblib.dump(label_encoders, encoders_path)
+        print(f"✅ Encoders saved: {encoders_path}")
+        
+    print(f"✅ Model deployment files saved successfully!")
+    
+except Exception as e:
+    print(f"⚠️ Error saving model: {e}")
+    import traceback
+    traceback.print_exc()
 
 print("\n🎉 Training and visualization pipeline completed successfully!")

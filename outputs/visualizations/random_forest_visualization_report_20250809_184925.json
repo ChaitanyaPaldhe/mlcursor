@@ -1,32 +1,19 @@
 {
-  "timestamp": "20250809_092343",
+  "timestamp": "20250809_184925",
   "model_info": {
     "model_name": "random_forest",
     "framework": "sklearn",
     "dataset": "penguins",
     "task_type": "classification",
     "cross_validation": {
-      "enabled": true,
-      "folds": 5,
-      "strategy": "auto"
-    },
-    "cv_results": {
-      "mean_score": 0.8981908638625058,
-      "std_score": 0.0433188949902564,
-      "individual_scores": [
-        0.835820895522388,
-        0.8805970149253731,
-        0.8805970149253731,
-        0.9545454545454546,
-        0.9393939393939394
-      ],
-      "scoring_metric": "Accuracy"
+      "enabled": false,
+      "folds": null,
+      "strategy": null
     }
   },
   "generated_plots": [
-    "outputs/visualizations\\random_forest_feature_importance_20250809_092343.png",
-    "outputs/visualizations\\random_forest_cv_scores_20250809_092343.png",
-    "outputs/visualizations\\random_forest_confusion_matrix_20250809_092343.png"
+    "outputs/visualizations\\random_forest_feature_importance_20250809_184925.png",
+    "outputs/visualizations\\random_forest_confusion_matrix_20250809_184925.png"
   ],
   "plot_descriptions": {
     "confusion_matrix": "Shows classification accuracy per class",

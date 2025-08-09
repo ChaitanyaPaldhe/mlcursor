@@ -7,6 +7,7 @@ import atexit
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 import shlex
+import glob
 
 # Add the current directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -26,7 +27,8 @@ class EpochInteractiveCLI:
             "datasets_used": set(),
             "last_model": None,
             "last_dataset": None,
-            "command_count": 0
+            "command_count": 0,
+            "deployed_models": []
         }
         
         # Setup command history
@@ -48,6 +50,11 @@ class EpochInteractiveCLI:
             'compare': [
                 r'compare\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
                 r'benchmark\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$'
+            ],
+            'deploy': [
+                r'deploy\s+(?:model\s+)?(.+?)(?:\s+(?:to|as)\s+(.+?))?(?:\s+(?:on\s+port\s+|port\s+)(\d+))?$',
+                r'(?:create|generate)\s+(?:fastapi\s+)?(?:api|deployment)\s+(?:for\s+)?(.+?)(?:\s+(?:to|as)\s+(.+?))?(?:\s+(?:on\s+port\s+|port\s+)(\d+))?$',
+                r'serve\s+(?:model\s+)?(.+?)(?:\s+(?:to|as)\s+(.+?))?(?:\s+(?:on\s+port\s+|port\s+)(\d+))?$'
             ]
         }
         
@@ -63,7 +70,7 @@ class EpochInteractiveCLI:
             'models': list(available_models),
             'datasets': list(self.known_datasets),
             'frameworks': list(set(config['framework'] for config in MODEL_REGISTRY.values())),
-            'commands': ['train', 'tune', 'compare', 'benchmark', 'list', 'help', 'history', 'clear', 'exit']
+            'commands': ['train', 'tune', 'compare', 'benchmark', 'deploy', 'list', 'help', 'history', 'clear', 'exit']
         }
 
     def setup_readline(self):
@@ -110,6 +117,16 @@ class EpochInteractiveCLI:
                 if any(word in ['train', 'tune', 'optimize', 'build', 'create', 'fit'] for word in words):
                     matches.extend([model for model in self.suggestions['models'] if model.startswith(text)])
                 
+                # After deploy command, suggest trained model files
+                if 'deploy' in words:
+                    # Look for .joblib and .pkl files in current directory and outputs/
+                    model_files = []
+                    for pattern in ['*.joblib', '*.pkl', 'outputs/*.joblib', 'outputs/*.pkl']:
+                        model_files.extend(glob.glob(pattern))
+                    # Remove directory prefix for cleaner completion
+                    clean_files = [os.path.basename(f) for f in model_files if os.path.basename(f).startswith(text)]
+                    matches.extend(clean_files)
+                
                 # After 'on' or dataset keywords, suggest datasets
                 if any(word in ['on', 'dataset', 'data', 'using'] for word in words[-2:]):
                     matches.extend([dataset for dataset in self.suggestions['datasets'] if dataset.startswith(text)])
@@ -131,11 +148,16 @@ class EpochInteractiveCLI:
                     ]
                     matches.extend([combo for combo in common_combos if combo.startswith(text)])
                 
+                # After 'port', suggest common port numbers
+                if 'port' in words:
+                    common_ports = ['8000', '8080', '5000', '3000', '9000']
+                    matches.extend([port for port in common_ports if port.startswith(text)])
+                
                 # Suggest common phrases and options
                 common_phrases = [
                     'with cv', 'with cross-validation', 'with 5-fold cv', 'with 10-fold cv',
                     'with 50 trials', 'with 100 trials', 'framework sklearn', 'framework xgboost',
-                    'stratified cv', 'kfold cv'
+                    'stratified cv', 'kfold cv', 'port 8000', 'port 8080', 'to deployment_fastapi'
                 ]
                 matches.extend([phrase for phrase in common_phrases if phrase.startswith(text)])
                 
@@ -168,10 +190,11 @@ class EpochInteractiveCLI:
         print("\n" + "="*70)
         print("🤖 Welcome to Epoch CLI v{} - Interactive ML Command Shell".format(self.version))
         print("="*70)
-        print("🎯 Train, tune, and compare ML models with natural language commands")
+        print("🎯 Train, tune, compare, and deploy ML models with natural language commands")
         print("📚 Type 'help' for available commands and examples")
         print("🔄 Use arrow keys for command history, Tab for auto-completion")
         print("💡 Example: 'train a random forest on penguins with 10-fold cv'")
+        print("🚀 Example: 'deploy model.joblib to my_api port 8080'")
         print("❌ Type 'exit' or 'quit' to leave")
         print("="*70 + "\n")
 
@@ -186,9 +209,15 @@ class EpochInteractiveCLI:
   compare <models> on <dataset> [options]  Compare multiple models
   benchmark <dataset> [options]            Comprehensive benchmarking
 
+🚀 DEPLOYMENT COMMANDS:
+  deploy <model_file> [to <output_dir>] [port <port>]    Generate FastAPI app
+  deploy model.joblib                                    Deploy to default directory
+  deploy model.pkl to my_api port 8080                   Custom deployment
+
 🛠️  UTILITY COMMANDS:
   list models [framework]                   Show available models
   list datasets                            Show known datasets
+  list deployments                         Show deployed models
   help                                     Show this help
   history                                  Show command history
   clear                                    Clear screen
@@ -201,6 +230,8 @@ class EpochInteractiveCLI:
   • benchmark iris with sklearn models
   • train lgbm on breast_cancer with 5-fold cv
   • optimize lightgbm hyperparameters on diabetes
+  • deploy trained_model.joblib to my_fastapi_app port 9000
+  • create fastapi api for model.pkl
 
 ⚙️  OPTIONS (can be mixed into commands):
   • with cv / with cross-validation         Enable cross-validation
@@ -208,6 +239,8 @@ class EpochInteractiveCLI:
   • with N trials                           Set HPO trials
   • framework sklearn/xgboost/lightgbm      Filter by framework
   • stratified cv / kfold cv                CV strategy
+  • port NNNN                              Specify deployment port
+  • to <directory>                         Specify output directory
 
 📁 AVAILABLE MODELS: {}
 
@@ -241,16 +274,30 @@ class EpochInteractiveCLI:
                 if match:
                     groups = match.groups()
                     
-                    # Extract model, dataset, and options
-                    model_part = groups[0] if groups[0] else ""
-                    dataset_part = groups[1] if len(groups) > 1 and groups[1] else ""
-                    options_part = groups[2] if len(groups) > 2 and groups[2] else ""
-                    
-                    # Clean and parse components
-                    params = self.extract_parameters(command, model_part, dataset_part, options_part)
-                    params['action'] = action
-                    
-                    return action, params
+                    if action == 'deploy':
+                        # Special handling for deploy command
+                        model_file = groups[0] if groups[0] else ""
+                        output_dir = groups[1] if len(groups) > 1 and groups[1] else "deployment_fastapi"
+                        port = int(groups[2]) if len(groups) > 2 and groups[2] else 8000
+                        
+                        params = {
+                            'action': 'deploy',
+                            'model_file': model_file.strip(),
+                            'output_dir': output_dir.strip() if output_dir else "deployment_fastapi",
+                            'port': port
+                        }
+                        return action, params
+                    else:
+                        # Extract model, dataset, and options
+                        model_part = groups[0] if groups[0] else ""
+                        dataset_part = groups[1] if len(groups) > 1 and groups[1] else ""
+                        options_part = groups[2] if len(groups) > 2 and groups[2] else ""
+                        
+                        # Clean and parse components
+                        params = self.extract_parameters(command, model_part, dataset_part, options_part)
+                        params['action'] = action
+                        
+                        return action, params
         
         # If no pattern matches, try to extract key information
         return 'unknown', {'original_command': command}
@@ -396,6 +443,15 @@ class EpochInteractiveCLI:
         if framework_match:
             params['framework'] = framework_match.group(1)
         
+        # Extract deployment-specific parameters
+        port_match = re.search(r'port\s+(\d+)', full_command, re.IGNORECASE)
+        if port_match:
+            params['port'] = int(port_match.group(1))
+        
+        output_dir_match = re.search(r'(?:to|as)\s+([^\s]+)', full_command, re.IGNORECASE)
+        if output_dir_match:
+            params['output_dir'] = output_dir_match.group(1)
+        
         return params
 
     def validate_and_enhance_params(self, action: str, params: Dict) -> Dict:
@@ -451,6 +507,50 @@ class EpochInteractiveCLI:
                 else:
                     print("❌ Dataset selection cancelled")
                     return {}
+        
+        elif action == 'deploy':
+            # Check for required model file
+            if not enhanced_params.get('model_file'):
+                print("🤔 No model file specified.")
+                model_file = self.prompt_for_model_file()
+                if model_file:
+                    enhanced_params['model_file'] = model_file
+                else:
+                    print("❌ Model file selection cancelled")
+                    return {}
+            
+            # Validate model file exists
+            model_file = enhanced_params['model_file']
+            
+            # Try different possible paths
+            possible_paths = [
+                model_file,
+                os.path.join('outputs', model_file),
+                f"{model_file}.joblib" if not model_file.endswith(('.joblib', '.pkl')) else model_file,
+                os.path.join('outputs', f"{model_file}.joblib") if not model_file.endswith(('.joblib', '.pkl')) else os.path.join('outputs', model_file)
+            ]
+            
+            valid_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    valid_path = path
+                    break
+            
+            if valid_path:
+                enhanced_params['model_file'] = valid_path
+                print(f"✅ Found model file: {valid_path}")
+            else:
+                print(f"❌ Model file not found: {model_file}")
+                print("💡 Available model files:")
+                model_files = glob.glob('*.joblib') + glob.glob('*.pkl') + glob.glob('outputs/*.joblib') + glob.glob('outputs/*.pkl')
+                if model_files:
+                    for i, f in enumerate(model_files[:5], 1):  # Show first 5
+                        print(f"  {i}. {f}")
+                    if len(model_files) > 5:
+                        print(f"  ... and {len(model_files) - 5} more")
+                else:
+                    print("  No model files found in current directory or outputs/")
+                return {}
         
         return enhanced_params
 
@@ -575,6 +675,140 @@ class EpochInteractiveCLI:
         except Exception as e:
             print(f"❌ Comparison failed: {e}")
 
+    def handle_deploy_command(self, params: Dict):
+        """Handle deployment commands with validation"""
+        # Validate and enhance parameters
+        params = self.validate_and_enhance_params('deploy', params)
+        if not params:
+            return
+            
+        model_file = params.get('model_file')
+        output_dir = params.get('output_dir', 'deployment_fastapi')
+        port = params.get('port', 8000)
+        
+        print(f"🚀 Deploying model: {model_file}")
+        print(f"📁 Output directory: {output_dir}")
+        print(f"🌐 Port: {port}")
+        
+        # Import and call fastapi deployer
+        try:
+            # Import the fastapi_deployer function
+            sys.path.append('core')
+            from core.fastapi_deployer import generate_fastapi_app
+            
+            # Generate the FastAPI deployment
+            generate_fastapi_app(model_file, output_dir, port)
+            
+            # Update session data
+            deployment_info = {
+                'model_file': model_file,
+                'output_dir': output_dir,
+                'port': port,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            self.session_data['deployed_models'].append(deployment_info)
+            self.session_data['command_count'] += 1
+            
+            print(f"✅ FastAPI deployment created successfully!")
+            print(f"📂 Files created in: {output_dir}/")
+            print(f"🔧 Next steps:")
+            print(f"   cd {output_dir}")
+            print(f"   pip install -r requirements.txt")
+            print(f"   python main.py")
+            print(f"🌍 API will be available at: http://localhost:{port}")
+            print(f"📖 API docs at: http://localhost:{port}/docs")
+            
+        except ImportError as e:
+            print(f"❌ Deployment failed: FastAPI deployer not found")
+            print("💡 Make sure fastapi_deployer.py exists in the core/ directory")
+        except Exception as e:
+            print(f"❌ Deployment failed: {e}")
+            print("💡 Check if the model file is valid and readable")
+    
+    def handle_compare_command(self, params: Dict):
+        """Handle model comparison commands with validation"""
+        # Validate and enhance parameters
+        params = self.validate_and_enhance_params('compare', params)
+        if not params:
+            return
+            
+        models = params.get('models', [])
+        dataset = params.get('dataset')
+        framework = params.get('framework')
+        
+        if not models and not framework:
+            # Use default comparison models
+            models = ['random_forest', 'xgboost', 'lightgbm', 'logistic_regression']
+            print(f"🏁 Using default models for comparison: {', '.join(models)}")
+        
+        # Import and call compare function from cli.py
+        try:
+            from cli import compare
+            
+            prompt = f"dataset: {dataset}"
+            
+            # Set up arguments
+            kwargs = {
+                'prompt': prompt,
+                'models': ','.join(models) if models else None,
+                'framework': framework,
+                'save_results': True,
+                'use_cv': params.get('use_cv', False),
+                'cv_folds': params.get('cv_folds', 5),
+                'generate_viz': True
+            }
+            
+            print(f"🏁 Comparing models on {dataset}")
+            if params.get('use_cv'):
+                print(f"📊 Using {params.get('cv_folds', 5)}-fold cross-validation")
+            
+            # Update session data
+            if models:
+                self.session_data['models_used'].update(models)
+            self.session_data['datasets_used'].add(dataset)
+            self.session_data['last_dataset'] = dataset
+            self.session_data['command_count'] += 1
+            
+            compare(**kwargs)
+            
+        except ImportError:
+            print("❌ Compare function not available")
+        except Exception as e:
+            print(f"❌ Comparison failed: {e}")
+
+    def handle_advisor_command(self, params: Dict):
+        """FIXED: Handle model advisor commands with proper validation"""
+        # Validate and enhance parameters first
+        params = self.validate_and_enhance_params('advisor', params)
+        if not params:
+            return
+            
+        dataset = params.get('dataset')
+        
+        print(f"🧠 Getting intelligent recommendations for {dataset}")
+        
+        try:
+            from cli import advisor
+            advisor(
+                dataset=dataset,  # Pass as positional argument
+                detailed=params.get('detailed', True),
+                auto_compare=params.get('auto_compare', False),
+                save_report=True,
+                prefer_interpretable=params.get('prefer_interpretable', False),
+                prefer_fast=params.get('prefer_fast', False)
+            )
+            
+            self.session_data['datasets_used'].add(dataset)
+            self.session_data['last_dataset'] = dataset
+            self.session_data['command_count'] += 1
+            
+        except ImportError:
+            print("❌ Advisor function not available")
+        except Exception as e:
+            print(f"❌ Advisor failed: {e}")
+            print("💡 Make sure the dataset name is correct")
+            print("💡 Available datasets: iris, wine, breast_cancer, penguins, etc.")
+
     def prompt_for_model(self) -> Optional[str]:
         """Interactive model selection"""
         available_models = get_available_models()
@@ -668,7 +902,13 @@ class EpochInteractiveCLI:
             
             elif action == 'compare':
                 self.handle_compare_command(params)
+
+            elif action == 'advisor':
+                self.handle_advisor_command(params)
             
+            elif action == 'deploy':
+                self.handle_deploy_command(params)
+
             elif action == 'unknown':
                 original_cmd = params.get('original_command', '')
                 print(f"❓ Couldn't understand command: '{original_cmd}'")
@@ -709,15 +949,19 @@ class EpochInteractiveCLI:
         
         # Check for common typos and variations
         typo_corrections = {
-            'trian': 'train', 'tarni': 'train', 'traing': 'train',
-            'optimzie': 'optimize', 'opitmize': 'optimize',
-            'comapre': 'compare', 'comprae': 'compare',
-            'benchamrk': 'benchmark', 'bencmark': 'benchmark',
-            'ramdom': 'random', 'forst': 'forest',
-            'xgbost': 'xgboost', 'xgboost': 'xgboost',
-            'lgbm': 'lightgbm', 'lightbgm': 'lightgbm',
-            'penquin': 'penguins', 'penguin': 'penguins'
-        }
+    'trian': 'train', 'tarni': 'train', 'traing': 'train',
+    'optimzie': 'optimize', 'opitmize': 'optimize',
+    'comapre': 'compare', 'comprae': 'compare',
+    'benchamrk': 'benchmark', 'bencmark': 'benchmark',
+    'ramdom': 'random', 'forst': 'forest',
+    'xgbost': 'xgboost', 'xgboost': 'xgboost',
+    'lgbm': 'lightgbm', 'lightbgm': 'lightgbm',
+    'analze': 'analyze', 'analize': 'analyze',
+    'advisr': 'advisor', 'advise': 'advisor',
+    'depoy': 'deploy', 'deplpy': 'deploy', 'deply': 'deploy',
+    'delpoy': 'deploy', 'depooy': 'deploy', 'depliy': 'deploy'
+}
+
         
         # Check for direct typo corrections
         for typo, correction in typo_corrections.items():

@@ -4,21 +4,9 @@
   "dataset": "penguins",
   "task_type": "classification",
   "cross_validation": {
-    "enabled": true,
-    "folds": 5,
-    "strategy": "auto"
-  },
-  "cv_results": {
-    "mean_score": 0.8981908638625058,
-    "std_score": 0.0433188949902564,
-    "individual_scores": [
-      0.835820895522388,
-      0.8805970149253731,
-      0.8805970149253731,
-      0.9545454545454546,
-      0.9393939393939394
-    ],
-    "scoring_metric": "Accuracy"
+    "enabled": false,
+    "folds": null,
+    "strategy": null
   },
   "config": {
     "class": "RandomForestClassifier",

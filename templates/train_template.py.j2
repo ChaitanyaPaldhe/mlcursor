@@ -840,4 +840,68 @@ with open(f"outputs/model_info_{model_name}{filename_suffix}.json", "w", encodin
 
 print(f"\n💾 Model info saved to outputs/model_info_{model_name}{filename_suffix}.json")
 
+# ═══════════════════════════════════════════════════════════════
+# 💾 MODEL SAVING FOR DEPLOYMENT
+# ═══════════════════════════════════════════════════════════════
+
+print("\n💾 Saving model for deployment...")
+
+import pickle
+import joblib
+from datetime import datetime
+
+# Create models directory
+os.makedirs("outputs/models", exist_ok=True)
+
+# Generate model filename
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+cv_suffix = "_cv" if use_cv else ""
+model_filename = f"{model_name}_{dataset}{cv_suffix}_{timestamp}"
+
+try:
+    {% if framework == "sklearn" or framework == "xgboost" or framework == "lightgbm" or framework == "catboost" %}
+    # Save sklearn-compatible models
+    model_path = f"outputs/models/{model_filename}.pkl"
+    joblib.dump(model, model_path)
+    print(f"✅ Model saved: {model_path}")
+    
+    {% elif framework == "tensorflow" %}
+    # Save TensorFlow model
+    model_path = f"outputs/models/{model_filename}.h5"
+    model.save(model_path)
+    print(f"✅ TensorFlow model saved: {model_path}")
+    
+    {% elif framework == "pytorch" %}
+    # Save PyTorch model
+    model_path = f"outputs/models/{model_filename}.pth"
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'input_size': X.shape[1],
+        'output_size': output_size,
+        'task_type': task_type,
+        'model_class': 'MLP'
+    }, model_path)
+    print(f"✅ PyTorch model saved: {model_path}")
+    {% endif %}
+    
+    # Save preprocessing components if they exist
+    {% if framework in ["tensorflow", "pytorch"] or model in ["svm", "logistic_regression"] %}
+    if 'scaler' in locals():
+        scaler_path = f"outputs/models/{model_filename}_scaler.pkl"
+        joblib.dump(scaler, scaler_path)
+        print(f"✅ Scaler saved: {scaler_path}")
+    {% endif %}
+    
+    if label_encoders:
+        encoders_path = f"outputs/models/{model_filename}_encoders.pkl"
+        joblib.dump(label_encoders, encoders_path)
+        print(f"✅ Encoders saved: {encoders_path}")
+        
+    print(f"✅ Model deployment files saved successfully!")
+    
+except Exception as e:
+    print(f"⚠️ Error saving model: {e}")
+    import traceback
+    traceback.print_exc()
+
 print("\n🎉 Training and visualization pipeline completed successfully!")
