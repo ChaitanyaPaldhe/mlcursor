@@ -1,0 +1,179 @@
+{
+  "dataset_profile": {
+    "n_samples": 333,
+    "n_features": 6,
+    "target_type": "binary_classification",
+    "n_classes": 2,
+    "missing_percentage": 0.0,
+    "duplicate_percentage": 0.0,
+    "numerical_features": 4,
+    "categorical_features": 2,
+    "high_cardinality_features": 0,
+    "class_imbalance_ratio": 0.9821428571428571,
+    "feature_correlation_max": 0.8729788985653615,
+    "target_skewness": null,
+    "complexity": "simple",
+    "estimated_training_time": "very_fast",
+    "top_features": [
+      "bill_depth_mm",
+      "body_mass_g",
+      "bill_length_mm",
+      "flipper_length_mm",
+      "species",
+      "island"
+    ],
+    "feature_importance_scores": {
+      "species": 0.013909249430301474,
+      "island": 0.005503941024992409,
+      "bill_length_mm": 0.1578421123894933,
+      "bill_depth_mm": 0.23581244123092948,
+      "flipper_length_mm": 0.12312520380038183,
+      "body_mass_g": 0.21340038513854598
+    }
+  },
+  "model_recommendations": [
+    {
+      "model_name": "random_forest",
+      "confidence": 1.0,
+      "reasoning": [
+        "Good fit for dataset size (333 samples)",
+        "Handles simple datasets well",
+        "Native support for categorical features"
+      ],
+      "expected_performance_range": [
+        0.75,
+        0.95
+      ],
+      "training_time_estimate": "medium",
+      "memory_requirements": "medium",
+      "hyperparameter_suggestions": {
+        "n_estimators": 100,
+        "max_depth": 10,
+        "min_samples_split": 5,
+        "class_weight": null
+      },
+      "pros": [
+        "Handles mixed data types",
+        "Built-in feature importance",
+        "Robust to outliers"
+      ],
+      "cons": [
+        "Can overfit with small datasets",
+        "Less interpretable than single trees"
+      ]
+    },
+    {
+      "model_name": "logistic_regression",
+      "confidence": 1.0,
+      "reasoning": [
+        "Good fit for dataset size (333 samples)",
+        "Handles simple datasets well"
+      ],
+      "expected_performance_range": [
+        0.75,
+        0.95
+      ],
+      "training_time_estimate": "fast",
+      "memory_requirements": "low",
+      "hyperparameter_suggestions": {
+        "C": 1.0,
+        "max_iter": 1000,
+        "class_weight": null
+      },
+      "pros": [
+        "Fast training",
+        "Interpretable",
+        "Probabilistic output"
+      ],
+      "cons": [
+        "Assumes linear relationships",
+        "Sensitive to outliers"
+      ]
+    },
+    {
+      "model_name": "svm",
+      "confidence": 0.7999999999999999,
+      "reasoning": [
+        "Good fit for dataset size (333 samples)"
+      ],
+      "expected_performance_range": [
+        0.75,
+        0.95
+      ],
+      "training_time_estimate": "slow",
+      "memory_requirements": "medium",
+      "hyperparameter_suggestions": {},
+      "pros": [
+        "Effective in high dimensions",
+        "Memory efficient"
+      ],
+      "cons": [
+        "Slow on large datasets",
+        "Requires feature scaling"
+      ]
+    },
+    {
+      "model_name": "xgboost",
+      "confidence": 0.5,
+      "reasoning": [
+        "Native support for categorical features"
+      ],
+      "expected_performance_range": [
+        0.75,
+        0.95
+      ],
+      "training_time_estimate": "medium",
+      "memory_requirements": "medium",
+      "hyperparameter_suggestions": {
+        "n_estimators": 100,
+        "learning_rate": 0.1,
+        "max_depth": 3,
+        "subsample": 1.0,
+        "colsample_bytree": 1.0
+      },
+      "pros": [
+        "Excellent performance",
+        "Handles imbalance well",
+        "Built-in regularization"
+      ],
+      "cons": [
+        "Many hyperparameters",
+        "Less interpretable",
+        "Can overfit"
+      ]
+    }
+  ],
+  "preprocessing_recommendations": [
+    {
+      "step": "Encode Categorical Features",
+      "reasoning": "Standard categorical encoding needed.",
+      "code_snippet": "from sklearn.preprocessing import LabelEncoder, OneHotEncoder",
+      "priority": 1
+    },
+    {
+      "step": "Scale Numerical Features",
+      "reasoning": "Numerical features may benefit from scaling for certain models.",
+      "code_snippet": "from sklearn.preprocessing import StandardScaler\nscaler = StandardScaler()",
+      "priority": 2
+    }
+  ],
+  "feature_engineering_suggestions": [
+    "Consider polynomial features for non-linear relationships",
+    "Create interaction features between important variables",
+    "Consider binning continuous variables for tree-based models"
+  ],
+  "training_strategy": {
+    "cv_strategy": "StratifiedKFold with 5 folds",
+    "validation": "Use cross-validation only (small dataset)",
+    "hyperparameter_tuning": "Grid search with 3-fold CV"
+  },
+  "evaluation_strategy": {
+    "primary_metric": "Accuracy",
+    "additional_metrics": "F1-score, AUC-ROC"
+  },
+  "metadata": {
+    "dataset_name": "penguins",
+    "generated_at": "2025-08-09 17:57:30",
+    "version": "1.0"
+  }
+}

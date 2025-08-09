@@ -1,5 +1,6 @@
 import typer
 from typing import List, Optional
+from typing import Dict, Any
 from core.train import train_from_prompt
 from core.tune import tune_from_prompt
 from core.logs import show_logs
@@ -436,6 +437,211 @@ def benchmark(
     
     print(f"\n🎉 Comprehensive benchmark completed!")
     print(f"📁 Results and visualizations saved in outputs/ directory")
+
+@app.command()
+def advisor(
+    dataset: str = typer.Argument(..., help="Dataset to analyze"),  # FIXED: Made dataset a required argument
+    detailed: bool = typer.Option(True, "--detailed/--summary", help="Show detailed analysis"),
+    auto_compare: bool = typer.Option(False, "--auto-compare", help="Automatically compare top 3 models"),
+    save_report: bool = typer.Option(True, "--save/--no-save", help="Save advisor report"),
+    prefer_interpretable: bool = typer.Option(False, "--interpretable", help="Prefer interpretable models"),
+    prefer_fast: bool = typer.Option(False, "--fast", help="Prefer fast training models")
+):
+    """Get intelligent model recommendations for your dataset."""
+    
+    # FIXED: Validate dataset parameter
+    if not dataset or dataset.lower() in ['none', 'null', '']:
+        print("❌ Dataset name is required for advisor command")
+        print("💡 Usage: python cli.py advisor <dataset_name>")
+        print("💡 Example: python cli.py advisor penguins")
+        return
+    
+    print(f"🧠 Analyzing dataset: {dataset}")
+    print("🔍 Loading and profiling data...")
+    
+    try:
+        # Import the advisor
+        from core.model_advisor import IntelligentModelAdvisor, print_advisor_report
+        
+        # Load dataset (reuse existing logic from train.py)
+        df = load_dataset(dataset)  # You'll need to extract this function
+        
+        # Prepare features and target
+        if 'target' in df.columns:
+            X = df.drop(columns=['target'])
+            y = df['target']
+        else:
+            X = df.drop(columns=[df.columns[-1]])
+            y = df[df.columns[-1]]
+        
+        # User preferences
+        user_prefs = {
+            "prefer_interpretable": prefer_interpretable,
+            "prefer_fast_training": prefer_fast
+        }
+        
+        # Initialize advisor and get recommendations
+        advisor = IntelligentModelAdvisor()
+        report = advisor.analyze_and_recommend(X, y, user_prefs)
+        
+        # Print the report
+        print_advisor_report(report, detailed=detailed)
+        
+        # Save report if requested
+        if save_report:
+            save_advisor_report(report, dataset)
+        
+        # Auto-compare top models if requested
+        if auto_compare and report["model_recommendations"]:
+            top_models = [rec.model_name for rec in report["model_recommendations"][:3]]
+            print(f"\n🚀 Auto-comparing top 3 models: {', '.join(top_models)}")
+            
+            # Call compare function with recommended models
+            compare(
+                prompt=f"dataset: {dataset}",
+                models=",".join(top_models),
+                use_cv=True,
+                cv_folds=5,
+                save_results=True,
+                generate_viz=True
+            )
+        
+    except ValueError as e:
+        print(f"❌ Dataset error: {e}")
+        print("💡 Available datasets: iris, wine, breast_cancer, penguins, titanic, etc.")
+        print("💡 Or place your CSV file in the data/ directory")
+    except Exception as e:
+        print(f"❌ Error in model advisor: {e}")
+        import traceback
+        traceback.print_exc()
+
+def load_dataset(dataset_name: str):
+    """Extract dataset loading logic from train.py"""
+    import pandas as pd
+    import seaborn as sns
+    from sklearn.datasets import load_iris, load_wine, load_breast_cancer, load_digits, load_diabetes
+    
+    # FIXED: Validate dataset_name parameter
+    if not dataset_name or dataset_name.lower() in ['none', 'null', '']:
+        raise ValueError("Dataset name cannot be empty or None")
+    
+    # Try CSV file first
+    try:
+        df = pd.read_csv(f"data/{dataset_name}.csv")
+        print(f"[SUCCESS] Loaded dataset from data/{dataset_name}.csv")
+        return df
+    except:
+        pass
+    
+    # Try seaborn datasets
+    try:
+        df = sns.load_dataset(dataset_name).dropna()
+        print(f"[SUCCESS] Loaded {dataset_name} from seaborn datasets")
+        return df
+    except:
+        pass
+    
+    # Try sklearn datasets
+    try:
+        dataset_loaders = {
+            'iris': load_iris,
+            'wine': load_wine, 
+            'breast_cancer': load_breast_cancer,
+            'digits': load_digits,
+            'diabetes': load_diabetes
+        }
+        
+        if dataset_name.lower() in dataset_loaders:
+            sklearn_data = dataset_loaders[dataset_name.lower()]()
+            df = pd.DataFrame(
+                sklearn_data.data, 
+                columns=sklearn_data.feature_names if hasattr(sklearn_data, 'feature_names') else 
+                        [f'feature_{i}' for i in range(sklearn_data.data.shape[1])]
+            )
+            df['target'] = sklearn_data.target
+            print(f"[SUCCESS] Loaded {dataset_name} from sklearn datasets")
+            return df
+    except:
+        pass
+    
+    raise ValueError(f"Dataset '{dataset_name}' not found")
+
+def save_advisor_report(report: Dict[str, Any], dataset_name: str):
+    """Save advisor report to JSON file"""
+    import os
+    import json
+    import time
+    from dataclasses import asdict
+    
+    os.makedirs("outputs", exist_ok=True)
+    
+    # Convert dataclasses to dicts for JSON serialization
+    serializable_report = {}
+    
+    # Convert dataset profile
+    profile = report["dataset_profile"]
+    serializable_report["dataset_profile"] = {
+        "n_samples": profile.n_samples,
+        "n_features": profile.n_features,
+        "target_type": profile.target_type.value,
+        "n_classes": profile.n_classes,
+        "missing_percentage": profile.missing_percentage,
+        "duplicate_percentage": profile.duplicate_percentage,
+        "numerical_features": profile.numerical_features,
+        "categorical_features": profile.categorical_features,
+        "high_cardinality_features": profile.high_cardinality_features,
+        "class_imbalance_ratio": profile.class_imbalance_ratio,
+        "feature_correlation_max": profile.feature_correlation_max,
+        "target_skewness": profile.target_skewness,
+        "complexity": profile.complexity.value,
+        "estimated_training_time": profile.estimated_training_time,
+        "top_features": profile.top_features,
+        "feature_importance_scores": profile.feature_importance_scores
+    }
+    
+    # Convert model recommendations
+    serializable_report["model_recommendations"] = []
+    for rec in report["model_recommendations"]:
+        serializable_report["model_recommendations"].append({
+            "model_name": rec.model_name,
+            "confidence": rec.confidence,
+            "reasoning": rec.reasoning,
+            "expected_performance_range": rec.expected_performance_range,
+            "training_time_estimate": rec.training_time_estimate,
+            "memory_requirements": rec.memory_requirements,
+            "hyperparameter_suggestions": rec.hyperparameter_suggestions,
+            "pros": rec.pros,
+            "cons": rec.cons
+        })
+    
+    # Convert preprocessing recommendations
+    serializable_report["preprocessing_recommendations"] = []
+    for rec in report["preprocessing_recommendations"]:
+        serializable_report["preprocessing_recommendations"].append({
+            "step": rec.step,
+            "reasoning": rec.reasoning,
+            "code_snippet": rec.code_snippet,
+            "priority": rec.priority
+        })
+    
+    # Copy other sections
+    serializable_report["feature_engineering_suggestions"] = report["feature_engineering_suggestions"]
+    serializable_report["training_strategy"] = report["training_strategy"]
+    serializable_report["evaluation_strategy"] = report["evaluation_strategy"]
+    
+    # Add metadata
+    serializable_report["metadata"] = {
+        "dataset_name": dataset_name,
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "version": "1.0"
+    }
+    
+    # Save to file
+    filename = f"outputs/advisor_report_{dataset_name}_{int(time.time())}.json"
+    with open(filename, "w", encoding='utf-8') as f:
+        json.dump(serializable_report, f, indent=2)
+    
+    print(f"💾 Advisor report saved to: {filename}")
 
 if __name__ == "__main__":
     app()

@@ -33,7 +33,7 @@ class EpochInteractiveCLI:
         self.history_file = os.path.expanduser("~/.epoch_history")
         self.setup_readline()
         
-        # IMPROVED: More flexible command patterns
+        # IMPROVED: More flexible command patterns with better advisor support
         self.command_patterns = {
             'train': [
                 r'train\s+(?:a\s+|an\s+)?(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
@@ -48,6 +48,12 @@ class EpochInteractiveCLI:
             'compare': [
                 r'compare\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$',
                 r'benchmark\s+(.+?)(?:\s+on\s+(.+?))?(?:\s+(?:with|using)\s+(.+))?$'
+            ],
+            'advisor': [
+                # FIXED: Better advisor patterns that capture dataset names properly
+                r'(?:analyze|advisor?|recommend)\s+(?:models?\s+(?:for\s+)?)?(.+?)(?:\s+dataset)?(?:\s+(?:with|using)\s+(.+))?$',
+                r'what\s+(?:models?|algorithms?)\s+(?:should\s+i\s+use\s+(?:for\s+)?|work\s+best\s+(?:for\s+)?)?(.+?)(?:\s+dataset)?(?:\s+(?:with|using)\s+(.+))?$',
+                r'suggest\s+(?:models?\s+(?:for\s+)?)?(.+?)(?:\s+dataset)?(?:\s+(?:with|using)\s+(.+))?$'
             ]
         }
         
@@ -112,6 +118,10 @@ class EpochInteractiveCLI:
                 
                 # After 'on' or dataset keywords, suggest datasets
                 if any(word in ['on', 'dataset', 'data', 'using'] for word in words[-2:]):
+                    matches.extend([dataset for dataset in self.suggestions['datasets'] if dataset.startswith(text)])
+                
+                # After advisor/analyze commands, suggest datasets
+                if any(word in ['analyze', 'advisor', 'recommend', 'suggest'] for word in words):
                     matches.extend([dataset for dataset in self.suggestions['datasets'] if dataset.startswith(text)])
                 
                 # After 'framework', suggest frameworks
@@ -186,6 +196,11 @@ class EpochInteractiveCLI:
   compare <models> on <dataset> [options]  Compare multiple models
   benchmark <dataset> [options]            Comprehensive benchmarking
 
+🧠 ANALYSIS COMMANDS:
+  analyze <dataset>                        Get model recommendations
+  advisor <dataset>                        Get intelligent model suggestions
+  recommend <dataset>                      Suggest best models for dataset
+
 🛠️  UTILITY COMMANDS:
   list models [framework]                   Show available models
   list datasets                            Show known datasets
@@ -198,9 +213,9 @@ class EpochInteractiveCLI:
   • train a random forest on penguins
   • tune xgboost on titanic with 100 trials
   • compare random_forest,xgboost,svm on wine with cv
+  • analyze penguins dataset
+  • recommend models for iris
   • benchmark iris with sklearn models
-  • train lgbm on breast_cancer with 5-fold cv
-  • optimize lightgbm hyperparameters on diabetes
 
 ⚙️  OPTIONS (can be mixed into commands):
   • with cv / with cross-validation         Enable cross-validation
@@ -241,19 +256,104 @@ class EpochInteractiveCLI:
                 if match:
                     groups = match.groups()
                     
-                    # Extract model, dataset, and options
-                    model_part = groups[0] if groups[0] else ""
-                    dataset_part = groups[1] if len(groups) > 1 and groups[1] else ""
-                    options_part = groups[2] if len(groups) > 2 and groups[2] else ""
-                    
-                    # Clean and parse components
-                    params = self.extract_parameters(command, model_part, dataset_part, options_part)
-                    params['action'] = action
-                    
-                    return action, params
+                    if action == 'advisor':
+                        # FIXED: Special handling for advisor commands
+                        # The first group should contain the dataset name
+                        dataset_part = groups[0] if groups[0] else ""
+                        options_part = groups[1] if len(groups) > 1 and groups[1] else ""
+                        
+                        params = self.extract_advisor_parameters(command, dataset_part, options_part)
+                        params['action'] = action
+                        
+                        return action, params
+                    else:
+                        # Extract model, dataset, and option for other commands
+                        model_part = groups[0] if groups[0] else ""
+                        dataset_part = groups[1] if len(groups) > 1 and groups[1] else ""
+                        options_part = groups[2] if len(groups) > 2 and groups[2] else ""
+                        
+                        # Clean and parse components
+                        params = self.extract_parameters(command, model_part, dataset_part, options_part)
+                        params['action'] = action
+                        
+                        return action, params
         
         # If no pattern matches, try to extract key information
         return 'unknown', {'original_command': command}
+
+    def extract_advisor_parameters(self, full_command: str, dataset_part: str, options_part: str) -> Dict:
+        """Extract parameters for advisor command"""
+        params = {}
+        
+        # FIXED: Extract dataset (same logic as before but more robust)
+        if dataset_part:
+            dataset_part = dataset_part.strip()
+            # Remove common words but be more careful
+            dataset_part = re.sub(r'\b(the|dataset|data|models?|for)\b', '', dataset_part, flags=re.IGNORECASE).strip()
+            # Remove extra whitespace
+            dataset_part = re.sub(r'\s+', ' ', dataset_part).strip()
+            
+            # Try to match with known datasets
+            matched_dataset = self.match_dataset_name(dataset_part)
+            if matched_dataset:
+                params['dataset'] = matched_dataset
+            else:
+                # Use the cleaned dataset part as-is if no exact match
+                params['dataset'] = dataset_part
+        
+        # Extract advisor-specific options
+        if re.search(r'\b(?:detailed|full|complete)\b', full_command, re.IGNORECASE):
+            params['detailed'] = True
+        elif re.search(r'\b(?:summary|brief|quick)\b', full_command, re.IGNORECASE):
+            params['detailed'] = False
+        else:
+            params['detailed'] = True  # Default to detailed
+        
+        if re.search(r'\b(?:auto.?compare|compare.?auto)\b', full_command, re.IGNORECASE):
+            params['auto_compare'] = True
+        
+        if re.search(r'\b(?:interpretable|explainable|transparent)\b', full_command, re.IGNORECASE):
+            params['prefer_interpretable'] = True
+        
+        if re.search(r'\b(?:fast|quick|speed)\b', full_command, re.IGNORECASE):
+            params['prefer_fast'] = True
+        
+        return params
+
+    def match_dataset_name(self, dataset_candidate: str) -> Optional[str]:
+        """FIXED: Match dataset candidate with known datasets using fuzzy matching"""
+        if not dataset_candidate:
+            return None
+        
+        dataset_candidate = dataset_candidate.lower().strip()
+        
+        # Exact match first
+        if dataset_candidate in self.known_datasets:
+            return dataset_candidate
+        
+        # Fuzzy matching
+        best_match = None
+        best_score = 0.0
+        
+        for dataset in self.known_datasets:
+            # Check if candidate is contained in dataset name or vice versa
+            if dataset_candidate in dataset.lower():
+                score = len(dataset_candidate) / len(dataset)
+                if score > best_score:
+                    best_match = dataset
+                    best_score = score
+            elif dataset.lower() in dataset_candidate:
+                score = len(dataset) / len(dataset_candidate)
+                if score > best_score:
+                    best_match = dataset
+                    best_score = score
+        
+        # Return match if confidence is high enough
+        if best_match and best_score >= 0.7:
+            return best_match
+        
+        # If no good match, return the original candidate (user might have a custom dataset)
+        return dataset_candidate
 
     def extract_parameters(self, full_command: str, model_part: str, dataset_part: str, options_part: str) -> Dict:
         """IMPROVED: Extract parameters from command components with better model list handling"""
@@ -342,34 +442,9 @@ class EpochInteractiveCLI:
         
         # IMPROVED: Extract dataset with better matching
         if dataset_part:
-            dataset_part = dataset_part.strip()
-            # Remove common words but be more careful
-            dataset_part = re.sub(r'\b(the|dataset|data)\b', '', dataset_part, flags=re.IGNORECASE).strip()
-            # Remove extra whitespace
-            dataset_part = re.sub(r'\s+', ' ', dataset_part).strip()
-            
-            # Try to match with known datasets
-            best_match = None
-            best_score = 0
-            
-            for dataset in self.known_datasets:
-                # Exact match
-                if dataset.lower() == dataset_part.lower():
-                    best_match = dataset
-                    best_score = 1.0
-                    break
-                # Partial match
-                elif dataset_part.lower() in dataset.lower() or dataset.lower() in dataset_part.lower():
-                    score = len(dataset_part) / max(len(dataset), len(dataset_part))
-                    if score > best_score:
-                        best_match = dataset
-                        best_score = score
-            
-            if best_match and best_score >= 0.7:  # Higher threshold for datasets
-                params['dataset'] = best_match
-            else:
-                # Use the cleaned dataset part as-is
-                params['dataset'] = dataset_part
+            matched_dataset = self.match_dataset_name(dataset_part)
+            if matched_dataset:
+                params['dataset'] = matched_dataset
         
         # Extract cross-validation settings
         cv_match = re.search(r'(\d+)[-\s]*fold\s+(?:cv|cross.?validation)', full_command, re.IGNORECASE)
@@ -445,6 +520,17 @@ class EpochInteractiveCLI:
             # Check for required dataset
             if not enhanced_params.get('dataset'):
                 print("🤔 No dataset specified for comparison.")
+                dataset = self.prompt_for_dataset()
+                if dataset:
+                    enhanced_params['dataset'] = dataset
+                else:
+                    print("❌ Dataset selection cancelled")
+                    return {}
+
+        elif action == 'advisor':
+            # FIXED: Enhanced validation for advisor command
+            if not enhanced_params.get('dataset'):
+                print("🤔 No dataset specified for advisor.")
                 dataset = self.prompt_for_dataset()
                 if dataset:
                     enhanced_params['dataset'] = dataset
@@ -575,6 +661,39 @@ class EpochInteractiveCLI:
         except Exception as e:
             print(f"❌ Comparison failed: {e}")
 
+    def handle_advisor_command(self, params: Dict):
+        """FIXED: Handle model advisor commands with proper validation"""
+        # Validate and enhance parameters first
+        params = self.validate_and_enhance_params('advisor', params)
+        if not params:
+            return
+            
+        dataset = params.get('dataset')
+        
+        print(f"🧠 Getting intelligent recommendations for {dataset}")
+        
+        try:
+            from cli import advisor
+            advisor(
+                dataset=dataset,  # Pass as positional argument
+                detailed=params.get('detailed', True),
+                auto_compare=params.get('auto_compare', False),
+                save_report=True,
+                prefer_interpretable=params.get('prefer_interpretable', False),
+                prefer_fast=params.get('prefer_fast', False)
+            )
+            
+            self.session_data['datasets_used'].add(dataset)
+            self.session_data['last_dataset'] = dataset
+            self.session_data['command_count'] += 1
+            
+        except ImportError:
+            print("❌ Advisor function not available")
+        except Exception as e:
+            print(f"❌ Advisor failed: {e}")
+            print("💡 Make sure the dataset name is correct")
+            print("💡 Available datasets: iris, wine, breast_cancer, penguins, etc.")
+
     def prompt_for_model(self) -> Optional[str]:
         """Interactive model selection"""
         available_models = get_available_models()
@@ -668,7 +787,10 @@ class EpochInteractiveCLI:
             
             elif action == 'compare':
                 self.handle_compare_command(params)
-            
+
+            elif action == 'advisor':
+                self.handle_advisor_command(params)
+
             elif action == 'unknown':
                 original_cmd = params.get('original_command', '')
                 print(f"❓ Couldn't understand command: '{original_cmd}'")
@@ -716,7 +838,8 @@ class EpochInteractiveCLI:
             'ramdom': 'random', 'forst': 'forest',
             'xgbost': 'xgboost', 'xgboost': 'xgboost',
             'lgbm': 'lightgbm', 'lightbgm': 'lightgbm',
-            'penquin': 'penguins', 'penguin': 'penguins'
+            'analze': 'analyze', 'analize': 'analyze',
+            'advisr': 'advisor', 'advise': 'advisor'
         }
         
         # Check for direct typo corrections
