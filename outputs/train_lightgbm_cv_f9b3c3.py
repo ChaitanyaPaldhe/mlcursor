@@ -6,7 +6,8 @@ from sklearn.metrics import accuracy_score, classification_report, mean_squared_
 
 # Cross-validation imports
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, KFold, cross_val_score, cross_validate
+from sklearn.metrics import make_scorer
 
 
 # Visualization imports
@@ -23,19 +24,19 @@ except ImportError as e:
 
 # Framework-specific imports based on model config
 
-from sklearn.linear_model import LogisticRegression
+import lightgbm as lgb
 
 
 # Config from prompt
-model_name = "logistic_regression"
+model_name = "lightgbm"
 dataset = "penguins"
-optimizer = "sgd"
-lr = 0.01
-epochs = 20
-task_type = "classification"
-use_cv = False
+optimizer = "adam"
+lr = 0.1
+epochs = 25
+task_type = "regression"
+use_cv = True
 cv_folds = 5
-cv_type = "stratified"
+cv_type = "auto"
 
 print(f"Training {model_name} on {dataset} dataset")
 print(f"Task type: {task_type}")
@@ -115,18 +116,32 @@ else:
 
 # Scale features for certain models
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-X = pd.DataFrame(X_scaled, columns=X.columns)
-print("[SUCCESS] Features scaled using StandardScaler")
-
 
 # Cross-validation setup
 
-# Traditional train/test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, 
-                                                   stratify=y if task_type == "classification" else None)
-print(f"[SUCCESS] Train/test split: {X_train.shape[0]} train, {X_test.shape[0]} test samples")
+# Determine CV strategy
+if cv_type == "auto":
+    if task_type == "classification":
+        cv_strategy = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        print(f"[SUCCESS] Using StratifiedKFold with {cv_folds} folds")
+    else:
+        cv_strategy = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        print(f"[SUCCESS] Using KFold with {cv_folds} folds")
+elif cv_type == "stratified":
+    cv_strategy = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    print(f"[SUCCESS] Using StratifiedKFold with {cv_folds} folds")
+else:  # kfold
+    cv_strategy = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    print(f"[SUCCESS] Using KFold with {cv_folds} folds")
+
+# Define scoring metric
+if task_type == "classification":
+    scoring = 'accuracy'
+    scoring_name = "Accuracy"
+else:
+    scoring = 'neg_mean_squared_error'
+    scoring_name = "Negative MSE"
+
 
 
 # Training based on framework and model
@@ -135,11 +150,11 @@ print(f"[SUCCESS] Train/test split: {X_train.shape[0]} train, {X_test.shape[0]} 
 
 model_params = {}
 
+model_params["n_estimators"] = 100
+
+model_params["learning_rate"] = 0.1
+
 model_params["random_state"] = 42
-
-model_params["max_iter"] = 1000
-
-model_params["C"] = 1.0
 
 
 # Apply user overrides
@@ -147,43 +162,59 @@ model_params["C"] = 1.0
 
 
 
+
+
+model_params["n_estimators"] = 100
+
+
+
+model_params["learning_rate"] = 0.1
+
+
+
 model_params["random_state"] = 42
 
 
 
-model_params["max_iter"] = 1000
-
-
-
-model_params["C"] = 1.0
-
-
-
 print(f"[SUCCESS] Model parameters: {model_params}")
-model = LogisticRegression(**model_params)
+model = LGBMClassifier(**model_params)
 
 
 
-# Traditional training
-model.fit(X_train, y_train)
+# Cross-validation training
+print(f"\n[INFO] Starting {cv_folds}-fold cross-validation...")
 
-# Predictions and evaluation
-y_pred = model.predict(X_test)
+# Perform cross-validation
+cv_scores = cross_val_score(model, X, y, cv=cv_strategy, scoring=scoring, n_jobs=-1)
 
+# Convert negative MSE back to positive for regression
+if task_type == "regression" and scoring == 'neg_mean_squared_error':
+    cv_scores = -cv_scores
+    scoring_name = "MSE"
+
+mean_score = cv_scores.mean()
+std_score = cv_scores.std()
+
+print(f"\n[RESULTS] Cross-Validation Results:")
+print(f"Individual fold scores: {[f'{score:.4f}' for score in cv_scores]}")
+print(f"Mean CV {scoring_name}: {mean_score:.4f} ± {std_score:.4f}")
+
+# Also get additional metrics
 if task_type == "classification":
-    accuracy = accuracy_score(y_test, y_pred)
-    print(f"\n[RESULTS] Results:")
-    print(f"Accuracy: {accuracy:.4f}")
-    print(f"\n[REPORT] Classification Report:")
-    print(classification_report(y_test, y_pred))
-else:
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    rmse = np.sqrt(mse)
-    print(f"\n[RESULTS] Results:")
-    print(f"MSE: {mse:.4f}")
-    print(f"RMSE: {rmse:.4f}")
-    print(f"R²: {r2:.4f}")
+    cv_results = cross_validate(model, X, y, cv=cv_strategy, 
+                               scoring=['accuracy', 'precision_macro', 'recall_macro', 'f1_macro'],
+                               n_jobs=-1)
+    
+    print(f"\n[METRICS] Additional CV Metrics:")
+    for metric, scores in cv_results.items():
+        if metric.startswith('test_'):
+            metric_name = metric.replace('test_', '').replace('_', ' ').title()
+            print(f"{metric_name}: {scores.mean():.4f} ± {scores.std():.4f}")
+
+# Train on full dataset for final model
+print(f"\n[INFO] Training final model on full dataset...")
+model.fit(X, y)
+
 
 
 
@@ -266,20 +297,29 @@ model_info_json = {
 }
 
 
+# Add CV results
+if 'cv_scores' in locals():
+    model_info_json["cv_results"] = {
+        "mean_score": float(mean_score),
+        "std_score": float(std_score),
+        "individual_scores": [float(score) for score in cv_scores],
+        "scoring_metric": scoring_name
+    }
+
 
 
 # Add model config if available
 config_data = {
-    "class": "LogisticRegression",
-    "framework": "sklearn",
-    "import": "from sklearn.linear_model import LogisticRegression",
+    "class": "LGBMClassifier",
+    "framework": "lightgbm",
+    "import": "import lightgbm as lgb",
     "default_params": {
         
+        "n_estimators": 100,
+        
+        "learning_rate": 0.1,
+        
         "random_state": 42,
-        
-        "max_iter": 1000,
-        
-        "C": 1.0,
         
     }
 }
@@ -293,13 +333,15 @@ model_info_json["training_params"] = {
     "optimizer": optimizer,
     "other_params": {
         
-        "penalty": "l2",
+        "num_leaves": 31,
+        
+        "objective": "rmse",
+        
+        "n_estimators": 100,
+        
+        "learning_rate": 0.1,
         
         "random_state": 42,
-        
-        "max_iter": 1000,
-        
-        "C": 1.0,
         
     }
 }

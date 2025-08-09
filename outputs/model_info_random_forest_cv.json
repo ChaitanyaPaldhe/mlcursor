@@ -1,5 +1,5 @@
 {
-  "model_name": "svm",
+  "model_name": "random_forest",
   "framework": "sklearn",
   "dataset": "penguins",
   "task_type": "classification",
@@ -9,25 +9,25 @@
     "strategy": "auto"
   },
   "cv_results": {
-    "mean_score": 0.9041610131162369,
-    "std_score": 0.040383266000417355,
+    "mean_score": 0.8981908638625058,
+    "std_score": 0.0433188949902564,
     "individual_scores": [
-      0.8507462686567164,
-      0.8656716417910447,
-      0.9104477611940298,
+      0.835820895522388,
+      0.8805970149253731,
+      0.8805970149253731,
       0.9545454545454546,
       0.9393939393939394
     ],
     "scoring_metric": "Accuracy"
   },
   "config": {
-    "class": "SVC",
+    "class": "RandomForestClassifier",
     "framework": "sklearn",
-    "import": "from sklearn.svm import SVC",
+    "import": "from sklearn.ensemble import RandomForestClassifier",
     "default_params": {
+      "n_estimators": 100,
       "random_state": 42,
-      "C": 1.0,
-      "gamma": "scale"
+      "max_depth": null
     }
   },
   "training_params": {
@@ -35,10 +35,9 @@
     "epochs": 10,
     "optimizer": "adam",
     "other_params": {
-      "C": 1.0,
-      "kernel": "rbf",
+      "n_estimators": 100,
       "random_state": 42,
-      "gamma": "scale"
+      "max_depth": null
     }
   }
 }

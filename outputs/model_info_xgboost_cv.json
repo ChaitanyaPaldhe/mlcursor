@@ -1,0 +1,46 @@
+{
+  "model_name": "xgboost",
+  "framework": "xgboost",
+  "dataset": "penguins",
+  "task_type": "classification",
+  "cross_validation": {
+    "enabled": true,
+    "folds": 5,
+    "strategy": "auto"
+  },
+  "cv_results": {
+    "mean_score": 0.8951153324287653,
+    "std_score": 0.04512570883031726,
+    "individual_scores": [
+      0.835820895522388,
+      0.8656716417910447,
+      0.9104477611940298,
+      0.9696969696969697,
+      0.8939393939393939
+    ],
+    "scoring_metric": "Accuracy"
+  },
+  "config": {
+    "class": "XGBClassifier",
+    "framework": "xgboost",
+    "import": "import xgboost as xgb",
+    "default_params": {
+      "max_depth": 3,
+      "learning_rate": 0.1,
+      "n_estimators": 100,
+      "random_state": 42
+    }
+  },
+  "training_params": {
+    "learning_rate": 0.01,
+    "epochs": 200,
+    "optimizer": "adam|sgd|rmsprop",
+    "other_params": {
+      "eval_metric": "logloss",
+      "max_depth": 3,
+      "learning_rate": 0.1,
+      "n_estimators": 100,
+      "random_state": 42
+    }
+  }
+}

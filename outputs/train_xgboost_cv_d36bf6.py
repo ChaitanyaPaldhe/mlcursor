@@ -6,7 +6,8 @@ from sklearn.metrics import accuracy_score, classification_report, mean_squared_
 
 # Cross-validation imports
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, KFold, cross_val_score, cross_validate
+from sklearn.metrics import make_scorer
 
 
 # Visualization imports
@@ -23,15 +24,17 @@ except ImportError as e:
 
 # Framework-specific imports based on model config
 
+import xgboost as xgb
+
 
 # Config from prompt
-model_name = "lightgbm"
+model_name = "xgboost"
 dataset = "penguins"
-optimizer = "adam"
+optimizer = "adam|sgd|rmsprop"
 lr = 0.01
-epochs = 25
+epochs = 200
 task_type = "classification"
-use_cv = False
+use_cv = True
 cv_folds = 5
 cv_type = "auto"
 
@@ -41,7 +44,7 @@ if use_cv:
     print(f"Using {cv_folds}-fold cross-validation ({cv_type})")
 else:
     print("Using train/test split")
-print(f"Framework: pytorch|xgboost")
+print(f"Framework: xgboost")
 
 # Generic dataset loading logic
 try:
@@ -116,13 +119,80 @@ else:
 
 # Cross-validation setup
 
-# Traditional train/test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, 
-                                                   stratify=y if task_type == "classification" else None)
-print(f"[SUCCESS] Train/test split: {X_train.shape[0]} train, {X_test.shape[0]} test samples")
+# Determine CV strategy
+if cv_type == "auto":
+    if task_type == "classification":
+        cv_strategy = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        print(f"[SUCCESS] Using StratifiedKFold with {cv_folds} folds")
+    else:
+        cv_strategy = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        print(f"[SUCCESS] Using KFold with {cv_folds} folds")
+elif cv_type == "stratified":
+    cv_strategy = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    print(f"[SUCCESS] Using StratifiedKFold with {cv_folds} folds")
+else:  # kfold
+    cv_strategy = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    print(f"[SUCCESS] Using KFold with {cv_folds} folds")
+
+# Define scoring metric
+if task_type == "classification":
+    scoring = 'accuracy'
+    scoring_name = "Accuracy"
+else:
+    scoring = 'neg_mean_squared_error'
+    scoring_name = "Negative MSE"
+
 
 
 # Training based on framework and model
+
+# XGBoost training
+model_params = {
+    'max_depth': 3,
+    'learning_rate': lr,
+    'n_estimators': epochs,
+    'random_state': 42,
+    'objective': 'binary:logistic' if task_type == 'classification' and len(y.unique()) == 2 else ('multi:softprob' if task_type == 'classification' else 'reg:squarederror')
+}
+
+# Apply additional user parameters
+
+
+model_params["eval_metric"] = 'logloss'
+
+
+
+
+
+
+
+
+
+
+
+print(f"[SUCCESS] XGBoost parameters: {model_params}")
+
+if task_type == "classification":
+    model = xgb.XGBClassifier(**model_params)
+else:
+    model = xgb.XGBRegressor(**model_params)
+
+
+# XGBoost Cross-validation
+print(f"\n[INFO] Starting {cv_folds}-fold cross-validation...")
+cv_scores = cross_val_score(model, X, y, cv=cv_strategy, scoring=scoring, n_jobs=-1)
+
+if task_type == "regression" and scoring == 'neg_mean_squared_error':
+    cv_scores = -cv_scores
+
+mean_score = cv_scores.mean()
+std_score = cv_scores.std()
+print(f"Mean CV {scoring_name}: {mean_score:.4f} ± {std_score:.4f}")
+
+# Train final model
+model.fit(X, y)
+
+
 
 
 print("\n[SUCCESS] Training completed successfully!")
@@ -153,7 +223,7 @@ if VISUALIZATIONS_AVAILABLE:
         # Generate summary report
         model_info = {
             "model_name": model_name,
-            "framework": "pytorch|xgboost",
+            "framework": "xgboost",
             "dataset": dataset,
             "task_type": task_type,
             "cross_validation": {
@@ -192,7 +262,7 @@ os.makedirs("outputs", exist_ok=True)
 # Prepare model info for JSON serialization
 model_info_json = {
     "model_name": model_name,
-    "framework": "pytorch|xgboost",
+    "framework": "xgboost",
     "dataset": dataset,
     "task_type": task_type,
     "cross_validation": {
@@ -203,18 +273,29 @@ model_info_json = {
 }
 
 
+# Add CV results
+if 'cv_scores' in locals():
+    model_info_json["cv_results"] = {
+        "mean_score": float(mean_score),
+        "std_score": float(std_score),
+        "individual_scores": [float(score) for score in cv_scores],
+        "scoring_metric": scoring_name
+    }
+
 
 
 # Add model config if available
 config_data = {
-    "class": "LGBMClassifier",
-    "framework": "lightgbm",
-    "import": "import lightgbm as lgb",
+    "class": "XGBClassifier",
+    "framework": "xgboost",
+    "import": "import xgboost as xgb",
     "default_params": {
         
-        "n_estimators": 100,
+        "max_depth": 3,
         
         "learning_rate": 0.1,
+        
+        "n_estimators": 100,
         
         "random_state": 42,
         
@@ -230,13 +311,13 @@ model_info_json["training_params"] = {
     "optimizer": optimizer,
     "other_params": {
         
-        "num_leaves": 31,
+        "eval_metric": "logloss",
         
-        "min_data_in_leaf": 10,
-        
-        "n_estimators": 100,
+        "max_depth": 3,
         
         "learning_rate": 0.1,
+        
+        "n_estimators": 100,
         
         "random_state": 42,
         

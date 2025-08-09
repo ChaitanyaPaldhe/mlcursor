@@ -1,6 +1,3 @@
-"""
-Fixed Interactive Epoch CLI - with improved dataset detection
-"""
 import os
 import sys
 import json
@@ -259,39 +256,89 @@ class EpochInteractiveCLI:
         return 'unknown', {'original_command': command}
 
     def extract_parameters(self, full_command: str, model_part: str, dataset_part: str, options_part: str) -> Dict:
-        """IMPROVED: Extract parameters from command components with better dataset detection"""
+        """IMPROVED: Extract parameters from command components with better model list handling"""
         params = {}
         
-        # Extract model
+        # FIXED: Extract models (handle comma-separated lists better)
         if model_part:
             model_part = model_part.strip()
-            # Remove articles and common words
-            model_part = re.sub(r'\b(a|an|the|model|classifier|regressor)\b', '', model_part, flags=re.IGNORECASE).strip()
-            model_part = re.sub(r'\s+', '_', model_part)  # Convert spaces to underscores
-
-            # Try to match with available models (fuzzy matching)
-            available_models = get_available_models()
-            best_match = None
-            best_score = 0
             
-            for model in available_models:
-                # Exact match
-                if model.lower() == model_part.lower():
-                    best_match = model
-                    best_score = 1.0
-                    break
-                # Partial match
-                elif model_part.lower() in model.lower() or model.lower() in model_part.lower():
-                    score = len(model_part) / max(len(model), len(model_part))
-                    if score > best_score:
-                        best_match = model
-                        best_score = score
-            
-            if best_match and best_score > 0.5:
-                params['model'] = best_match
+            # Check if this looks like a comma-separated list of models
+            if ',' in model_part:
+                # Split by comma and clean each model name
+                model_candidates = [m.strip() for m in model_part.split(',')]
+                valid_models = []
+                available_models = get_available_models()
+                
+                for candidate in model_candidates:
+                    # Clean the candidate name
+                    clean_candidate = re.sub(r'\b(a|an|the|model|classifier|regressor)\b', '', candidate, flags=re.IGNORECASE).strip()
+                    clean_candidate = re.sub(r'\s+', '_', clean_candidate)
+                    
+                    # Try to match with available models
+                    best_match = None
+                    best_score = 0
+                    
+                    for model in available_models:
+                        # Exact match
+                        if model.lower() == clean_candidate.lower():
+                            best_match = model
+                            best_score = 1.0
+                            break
+                        # Partial match
+                        elif clean_candidate.lower() in model.lower() or model.lower() in clean_candidate.lower():
+                            score = len(clean_candidate) / max(len(model), len(clean_candidate))
+                            if score > best_score:
+                                best_match = model
+                                best_score = score
+                    
+                    if best_match and best_score > 0.5:
+                        valid_models.append(best_match)
+                    else:
+                        # Try the original candidate as-is
+                        valid_models.append(clean_candidate)
+                
+                params['models'] = valid_models
             else:
-                # If no good match, use the cleaned model part
-                params['model'] = model_part
+                # Single model - existing logic
+                # Remove articles and common words
+                model_part = re.sub(r'\b(a|an|the|model|classifier|regressor)\b', '', model_part, flags=re.IGNORECASE).strip()
+                model_part = re.sub(r'\s+', '_', model_part)
+
+                # Try to match with available models (fuzzy matching)
+                available_models = get_available_models()
+                best_match = None
+                best_score = 0
+                
+                for model in available_models:
+                    # Exact match
+                    if model.lower() == model_part.lower():
+                        best_match = model
+                        best_score = 1.0
+                        break
+                    # Partial match
+                    elif model_part.lower() in model.lower() or model.lower() in model_part.lower():
+                        score = len(model_part) / max(len(model), len(model_part))
+                        if score > best_score:
+                            best_match = model
+                            best_score = score
+                
+                if best_match and best_score > 0.5:
+                    params['model'] = best_match
+                else:
+                    # If no good match, use the cleaned model part
+                    params['model'] = model_part
+        
+        # Handle framework specification (e.g., "sklearn models", "xgboost models")
+        if model_part and ('models' in model_part or 'framework' in full_command):
+            framework_match = re.search(r'(sklearn|xgboost|lightgbm|tensorflow|pytorch|catboost)\s+models?', model_part, re.IGNORECASE)
+            if framework_match:
+                params['framework'] = framework_match.group(1).lower()
+                # Remove the model specification since we're using framework
+                if 'model' in params:
+                    del params['model']
+                if 'models' in params:
+                    del params['models']
         
         # IMPROVED: Extract dataset with better matching
         if dataset_part:
@@ -348,16 +395,6 @@ class EpochInteractiveCLI:
         framework_match = re.search(r'framework\s+(\w+)', full_command, re.IGNORECASE)
         if framework_match:
             params['framework'] = framework_match.group(1)
-        
-        # Extract models list for comparison
-        if 'compare' in full_command:
-            models_match = re.search(r'compare\s+([^on]+)', full_command, re.IGNORECASE)
-            if models_match:
-                models_str = models_match.group(1).strip()
-                # Split by common separators
-                models = re.split(r'[,\s]+(?:and\s+|vs\s+|versus\s+)?', models_str)
-                models = [m.strip() for m in models if m.strip()]
-                params['models'] = models
         
         return params
 
