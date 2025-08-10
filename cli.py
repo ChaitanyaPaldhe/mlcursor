@@ -1,5 +1,6 @@
 import typer
 from typing import List, Optional
+from typing import Dict, Any
 from core.train import train_from_prompt
 from core.tune import tune_from_prompt
 from core.logs import show_logs
@@ -10,6 +11,8 @@ import time
 import re
 import sys
 from io import StringIO
+import numpy as np
+import pandas as pd
 
 app = typer.Typer()
 
@@ -438,6 +441,7 @@ def benchmark(
     print(f"📁 Results and visualizations saved in outputs/ directory")
 
 @app.command()
+
 def deploy_fastapi(
     model_path: str = typer.Argument(..., help="Path to trained model file (.joblib/.pkl)"),
     output_dir: str = typer.Option("deployment_fastapi", "--output", "-o", help="Directory to save deployment files"),
@@ -447,6 +451,543 @@ def deploy_fastapi(
     from core.fastapi_deployer import generate_fastapi_app
     generate_fastapi_app(model_path, output_dir, port)
     print(f"✅ FastAPI deployment files created in '{output_dir}'")
+
+def advisor(
+    dataset: str = typer.Argument(..., help="Dataset to analyze"),  # FIXED: Made dataset a required argument
+    detailed: bool = typer.Option(True, "--detailed/--summary", help="Show detailed analysis"),
+    auto_compare: bool = typer.Option(False, "--auto-compare", help="Automatically compare top 3 models"),
+    save_report: bool = typer.Option(True, "--save/--no-save", help="Save advisor report"),
+    prefer_interpretable: bool = typer.Option(False, "--interpretable", help="Prefer interpretable models"),
+    prefer_fast: bool = typer.Option(False, "--fast", help="Prefer fast training models")
+):
+    """Get intelligent model recommendations for your dataset."""
     
+    # FIXED: Validate dataset parameter
+    if not dataset or dataset.lower() in ['none', 'null', '']:
+        print("❌ Dataset name is required for advisor command")
+        print("💡 Usage: python cli.py advisor <dataset_name>")
+        print("💡 Example: python cli.py advisor penguins")
+        return
+    
+    print(f"🧠 Analyzing dataset: {dataset}")
+    print("🔍 Loading and profiling data...")
+    
+    try:
+        # Import the advisor
+        from core.model_advisor import IntelligentModelAdvisor, print_advisor_report
+        
+        # Load dataset (reuse existing logic from train.py)
+        df = load_dataset(dataset)  # You'll need to extract this function
+        
+        # Prepare features and target
+        if 'target' in df.columns:
+            X = df.drop(columns=['target'])
+            y = df['target']
+        else:
+            X = df.drop(columns=[df.columns[-1]])
+            y = df[df.columns[-1]]
+        
+        # User preferences
+        user_prefs = {
+            "prefer_interpretable": prefer_interpretable,
+            "prefer_fast_training": prefer_fast
+        }
+        
+        # Initialize advisor and get recommendations
+        advisor = IntelligentModelAdvisor()
+        report = advisor.analyze_and_recommend(X, y, user_prefs)
+        
+        # Print the report
+        print_advisor_report(report, detailed=detailed)
+        
+        # Save report if requested
+        if save_report:
+            save_advisor_report(report, dataset)
+        
+        # Auto-compare top models if requested
+        if auto_compare and report["model_recommendations"]:
+            top_models = [rec.model_name for rec in report["model_recommendations"][:3]]
+            print(f"\n🚀 Auto-comparing top 3 models: {', '.join(top_models)}")
+            
+            # Call compare function with recommended models
+            compare(
+                prompt=f"dataset: {dataset}",
+                models=",".join(top_models),
+                use_cv=True,
+                cv_folds=5,
+                save_results=True,
+                generate_viz=True
+            )
+        
+    except ValueError as e:
+        print(f"❌ Dataset error: {e}")
+        print("💡 Available datasets: iris, wine, breast_cancer, penguins, titanic, etc.")
+        print("💡 Or place your CSV file in the data/ directory")
+    except Exception as e:
+        print(f"❌ Error in model advisor: {e}")
+        import traceback
+        traceback.print_exc()
+
+def load_dataset(dataset_name: str):
+    """Extract dataset loading logic from train.py"""
+    import pandas as pd
+    import seaborn as sns
+    from sklearn.datasets import load_iris, load_wine, load_breast_cancer, load_digits, load_diabetes
+    
+    # FIXED: Validate dataset_name parameter
+    if not dataset_name or dataset_name.lower() in ['none', 'null', '']:
+        raise ValueError("Dataset name cannot be empty or None")
+    
+    # Try CSV file first
+    try:
+        df = pd.read_csv(f"data/{dataset_name}.csv")
+        print(f"[SUCCESS] Loaded dataset from data/{dataset_name}.csv")
+        return df
+    except:
+        pass
+    
+    # Try seaborn datasets
+    try:
+        df = sns.load_dataset(dataset_name).dropna()
+        print(f"[SUCCESS] Loaded {dataset_name} from seaborn datasets")
+        return df
+    except:
+        pass
+    
+    # Try sklearn datasets
+    try:
+        dataset_loaders = {
+            'iris': load_iris,
+            'wine': load_wine, 
+            'breast_cancer': load_breast_cancer,
+            'digits': load_digits,
+            'diabetes': load_diabetes
+        }
+        
+        if dataset_name.lower() in dataset_loaders:
+            sklearn_data = dataset_loaders[dataset_name.lower()]()
+            df = pd.DataFrame(
+                sklearn_data.data, 
+                columns=sklearn_data.feature_names if hasattr(sklearn_data, 'feature_names') else 
+                        [f'feature_{i}' for i in range(sklearn_data.data.shape[1])]
+            )
+            df['target'] = sklearn_data.target
+            print(f"[SUCCESS] Loaded {dataset_name} from sklearn datasets")
+            return df
+    except:
+        pass
+    
+    raise ValueError(f"Dataset '{dataset_name}' not found")
+
+def save_advisor_report(report: Dict[str, Any], dataset_name: str):
+    """Save advisor report to JSON file"""
+    import os
+    import json
+    import time
+    from dataclasses import asdict
+    
+    os.makedirs("outputs", exist_ok=True)
+    
+    # Convert dataclasses to dicts for JSON serialization
+    serializable_report = {}
+    
+    # Convert dataset profile
+    profile = report["dataset_profile"]
+    serializable_report["dataset_profile"] = {
+        "n_samples": profile.n_samples,
+        "n_features": profile.n_features,
+        "target_type": profile.target_type.value,
+        "n_classes": profile.n_classes,
+        "missing_percentage": profile.missing_percentage,
+        "duplicate_percentage": profile.duplicate_percentage,
+        "numerical_features": profile.numerical_features,
+        "categorical_features": profile.categorical_features,
+        "high_cardinality_features": profile.high_cardinality_features,
+        "class_imbalance_ratio": profile.class_imbalance_ratio,
+        "feature_correlation_max": profile.feature_correlation_max,
+        "target_skewness": profile.target_skewness,
+        "complexity": profile.complexity.value,
+        "estimated_training_time": profile.estimated_training_time,
+        "top_features": profile.top_features,
+        "feature_importance_scores": profile.feature_importance_scores
+    }
+    
+    # Convert model recommendations
+    serializable_report["model_recommendations"] = []
+    for rec in report["model_recommendations"]:
+        serializable_report["model_recommendations"].append({
+            "model_name": rec.model_name,
+            "confidence": rec.confidence,
+            "reasoning": rec.reasoning,
+            "expected_performance_range": rec.expected_performance_range,
+            "training_time_estimate": rec.training_time_estimate,
+            "memory_requirements": rec.memory_requirements,
+            "hyperparameter_suggestions": rec.hyperparameter_suggestions,
+            "pros": rec.pros,
+            "cons": rec.cons
+        })
+    
+    # Convert preprocessing recommendations
+    serializable_report["preprocessing_recommendations"] = []
+    for rec in report["preprocessing_recommendations"]:
+        serializable_report["preprocessing_recommendations"].append({
+            "step": rec.step,
+            "reasoning": rec.reasoning,
+            "code_snippet": rec.code_snippet,
+            "priority": rec.priority
+        })
+    
+    # Copy other sections
+    serializable_report["feature_engineering_suggestions"] = report["feature_engineering_suggestions"]
+    serializable_report["training_strategy"] = report["training_strategy"]
+    serializable_report["evaluation_strategy"] = report["evaluation_strategy"]
+    
+    # Add metadata
+    serializable_report["metadata"] = {
+        "dataset_name": dataset_name,
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "version": "1.0"
+    }
+    
+    # Save to file
+    filename = f"outputs/advisor_report_{dataset_name}_{int(time.time())}.json"
+    with open(filename, "w", encoding='utf-8') as f:
+        json.dump(serializable_report, f, indent=2)
+    
+    print(f"💾 Advisor report saved to: {filename}")
+
+@app.command()
+def engineer(
+    prompt: str,
+    dataset: str = typer.Option(None, "--dataset", "-d", help="Dataset to engineer features for"),
+    output: str = typer.Option("engineered_features.csv", "--output", "-o", help="Output file for engineered features"),
+    save_importance: bool = typer.Option(True, "--save-importance/--no-importance", help="Save feature importance rankings"),
+    show_report: bool = typer.Option(True, "--report/--no-report", help="Show detailed engineering report"),
+    target_column: str = typer.Option(None, "--target", "-t", help="Target column name for supervised feature engineering")
+):
+    """Engineer features from a dataset using natural language commands."""
+    
+    print(f"🔧 Feature Engineering: {prompt}")
+    
+    try:
+        # Import feature engineering modules
+        from core.feature_engineer import engineer_features_from_prompt, print_engineering_report, FeatureEngineeringRecommender
+        
+        # Load dataset
+        df = load_dataset(dataset or extract_dataset_from_prompt(prompt))
+        
+        # Separate features and target
+        if target_column and target_column in df.columns:
+            X = df.drop(columns=[target_column])
+            y = df[target_column]
+        elif 'target' in df.columns:
+            X = df.drop(columns=['target'])
+            y = df['target']
+        else:
+            # Use last column as target if not specified
+            X = df.drop(columns=[df.columns[-1]])
+            y = df[df.columns[-1]] if len(df.columns) > 1 else None
+        
+        print(f"📊 Dataset: {X.shape[0]} rows, {X.shape[1]} features")
+        if y is not None:
+            print(f"🎯 Target: {y.name} ({y.dtype})")
+        
+        # Get dataset recommendations
+        recommender = FeatureEngineeringRecommender()
+        analysis = recommender.analyze_dataset(X, y)
+        
+        print(f"\n🔍 Dataset Analysis:")
+        print(f"  • Numerical features: {analysis['numerical_features']}")
+        print(f"  • Categorical features: {analysis['categorical_features']}")
+        print(f"  • Missing values: {analysis['missing_values']}")
+        
+        if analysis['recommendations']:
+            print(f"  • Recommendations: {len(analysis['recommendations'])} found")
+            for rec in analysis['recommendations'][:3]:  # Show top 3
+                print(f"    - {rec['recommendation']}")
+        
+        # Apply feature engineering
+        print(f"\n⚙️  Applying feature engineering...")
+        result = engineer_features_from_prompt(prompt, X, y)
+        
+        # Show report
+        if show_report:
+            print_engineering_report(result, show_details=True)
+        
+        # Save results
+        os.makedirs("outputs", exist_ok=True)
+        output_path = f"outputs/{output}"
+        result.transformed_features.to_csv(output_path, index=False)
+        print(f"💾 Engineered features saved to: {output_path}")
+        
+        # Save feature importance
+        if save_importance and result.feature_importance:
+            importance_path = f"outputs/feature_importance_{int(time.time())}.json"
+            with open(importance_path, "w") as f:
+                json.dump(result.feature_importance, f, indent=2)
+            print(f"📊 Feature importance saved to: {importance_path}")
+        
+        # Save detailed report
+        report_path = f"outputs/engineering_report_{int(time.time())}.json"
+        report_data = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "prompt": prompt,
+            "original_shape": X.shape,
+            "engineered_shape": result.transformed_features.shape,
+            "created_features": result.created_features,
+            "removed_features": result.removed_features,
+            "engineering_log": result.engineering_log,
+            "feature_importance": result.feature_importance,
+            "dataset_analysis": analysis
+        }
+        
+        with open(report_path, "w") as f:
+            json.dump(report_data, f, indent=2, default=str)
+        print(f"📋 Engineering report saved to: {report_path}")
+        
+    except Exception as e:
+        print(f"❌ Feature engineering failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+@app.command()
+def select(
+    dataset: str,
+    method: str = typer.Option("univariate", "--method", "-m", help="Selection method: univariate, recursive, model_based, correlation, variance"),
+    k: int = typer.Option(50, "--top", "-k", help="Number of features to select"),
+    target_column: str = typer.Option(None, "--target", "-t", help="Target column name"),
+    output: str = typer.Option("selected_features.csv", "--output", "-o", help="Output file for selected features"),
+    show_importance: bool = typer.Option(True, "--importance/--no-importance", help="Show feature importance rankings")
+):
+    """Select top features using various selection methods."""
+    
+    print(f"🎯 Feature Selection: {method} (top {k})")
+    
+    try:
+        from core.feature_engineer import AutomatedFeatureEngineer, print_engineering_report
+        
+        # Load dataset
+        df = load_dataset(dataset)
+        
+        # Separate features and target
+        if target_column and target_column in df.columns:
+            X = df.drop(columns=[target_column])
+            y = df[target_column]
+        elif 'target' in df.columns:
+            X = df.drop(columns=['target'])
+            y = df['target']
+        else:
+            X = df.drop(columns=[df.columns[-1]])
+            y = df[df.columns[-1]]
+        
+        print(f"📊 Dataset: {X.shape[0]} rows, {X.shape[1]} features")
+        print(f"🎯 Target: {y.name} ({y.dtype})")
+        
+        # Initialize feature engineer
+        engineer = AutomatedFeatureEngineer()
+        
+        # Apply feature selection
+        print(f"🔍 Selecting features using {method}...")
+        X_selected = engineer.select_features(X, y, method=method, k=k)
+        
+        # Calculate importance for selected features
+        importance = engineer._calculate_feature_importance(X_selected, y)
+        
+        # Create result object
+        from core.feature_engineer import FeatureEngineeringResult
+        result = FeatureEngineeringResult(
+            transformed_features=X_selected,
+            feature_names=list(X_selected.columns),
+            feature_importance=importance,
+            engineering_log=[f"Applied {method} feature selection (k={k})"],
+            removed_features=[f for f in X.columns if f not in X_selected.columns],
+            created_features=[]
+        )
+        
+        # Show results
+        print_engineering_report(result)
+        
+        if show_importance:
+            print(f"\n🏆 FEATURE IMPORTANCE RANKINGS:")
+            for i, (feature, imp) in enumerate(importance.items(), 1):
+                print(f"   {i:2d}. {feature:<30} {imp:.4f}")
+        
+        # Save results
+        os.makedirs("outputs", exist_ok=True)
+        output_path = f"outputs/{output}"
+        X_selected.to_csv(output_path, index=False)
+        print(f"💾 Selected features saved to: {output_path}")
+        
+        # Save selection report
+        report_path = f"outputs/selection_report_{int(time.time())}.json"
+        report_data = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "method": method,
+            "k": k,
+            "original_features": len(X.columns),
+            "selected_features": len(X_selected.columns),
+            "removed_features": len(result.removed_features),
+            "feature_importance": importance,
+            "selected_feature_list": list(X_selected.columns),
+            "removed_feature_list": result.removed_features
+        }
+        
+        with open(report_path, "w") as f:
+            json.dump(report_data, f, indent=2)
+        print(f"📋 Selection report saved to: {report_path}")
+        
+    except Exception as e:
+        print(f"❌ Feature selection failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+@app.command()
+def time_features(
+    dataset: str,
+    date_column: str = typer.Option("date", "--date-col", "-d", help="Date column name"),
+    windows: str = typer.Option("7D,30D,90D", "--windows", "-w", help="Rolling window sizes (comma-separated)"),
+    lags: str = typer.Option("1,7,30", "--lags", "-l", help="Lag periods (comma-separated)"),
+    output: str = typer.Option("time_features.csv", "--output", "-o", help="Output file"),
+    include_seasonality: bool = typer.Option(True, "--seasonality/--no-seasonality", help="Include seasonal features")
+):
+    """Create time-series specific features."""
+    
+    window_list = [w.strip().upper() for w in windows.split(",")]
+    lag_list = [int(l.strip()) for l in lags.split(",")]
+    
+    print(f"📅 Time Series Feature Engineering")
+    print(f"   Windows: {', '.join(window_list)}")
+    print(f"   Lags: {', '.join(map(str, lag_list))}")
+    
+    try:
+        from core.feature_engineer import AutomatedFeatureEngineer
+        
+        # Load dataset
+        df = load_dataset(dataset)
+        
+        print(f"📊 Dataset: {df.shape[0]} rows, {df.shape[1]} columns")
+        
+        # Check if date column exists
+        if date_column not in df.columns:
+            # Try to find a date column automatically
+            date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+            if date_cols:
+                date_column = date_cols[0]
+                print(f"🔍 Using detected date column: {date_column}")
+            else:
+                # Try to convert string columns that look like dates
+                for col in df.columns:
+                    if any(word in col.lower() for word in ['date', 'time', 'timestamp']):
+                        try:
+                            df[col] = pd.to_datetime(df[col])
+                            date_column = col
+                            print(f"🔍 Converted and using date column: {date_column}")
+                            break
+                        except:
+                            continue
+                else:
+                    raise ValueError(f"Date column '{date_column}' not found and no date columns detected")
+        
+        # Initialize feature engineer
+        engineer = AutomatedFeatureEngineer()
+        
+        # Create time series features
+        print(f"⏰ Creating time-series features...")
+        df_ts = engineer.create_time_series_features(df, date_column, window_list)
+        
+        # Add custom lag features if different from default
+        numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        for col in numerical_cols:
+            for lag in lag_list:
+                if f"{col}_lag_{lag}" not in df_ts.columns:
+                    df_ts[f"{col}_lag_{lag}"] = df_ts[col].shift(lag)
+        
+        # Add seasonality features if requested
+        if include_seasonality:
+            df_ts = df_ts.set_index(date_column) if date_column in df_ts.columns else df_ts
+            
+            # Seasonal decomposition features (simplified)
+            for col in numerical_cols:
+                if col in df_ts.columns:
+                    # Monthly seasonality
+                    df_ts[f"{col}_month_avg"] = df_ts[col].groupby(df_ts.index.month).transform('mean')
+                    
+                    # Day of week seasonality  
+                    df_ts[f"{col}_dow_avg"] = df_ts[col].groupby(df_ts.index.dayofweek).transform('mean')
+                    
+                    # Hour seasonality (if datetime has hour info)
+                    if hasattr(df_ts.index, 'hour'):
+                        df_ts[f"{col}_hour_avg"] = df_ts[col].groupby(df_ts.index.hour).transform('mean')
+            
+            df_ts = df_ts.reset_index()
+        
+        # Remove rows with NaN values created by lags/rolling windows
+        initial_rows = len(df_ts)
+        df_ts = df_ts.dropna()
+        final_rows = len(df_ts)
+        
+        print(f"✨ Created {len(df_ts.columns) - len(df.columns)} new time-series features")
+        print(f"📉 Dropped {initial_rows - final_rows} rows due to NaN values from lags/rolling windows")
+        print(f"📊 Final dataset: {df_ts.shape[0]} rows, {df_ts.shape[1]} columns")
+        
+        # Save results
+        os.makedirs("outputs", exist_ok=True)
+        output_path = f"outputs/{output}"
+        df_ts.to_csv(output_path, index=False)
+        print(f"💾 Time-series features saved to: {output_path}")
+        
+        # Create feature summary
+        new_features = [col for col in df_ts.columns if col not in df.columns]
+        feature_categories = {
+            "rolling_stats": [f for f in new_features if "rolling" in f],
+            "lag_features": [f for f in new_features if "lag" in f],
+            "diff_features": [f for f in new_features if "diff" in f],
+            "time_features": [f for f in new_features if any(t in f for t in ['year', 'month', 'day', 'quarter', 'weekend'])],
+            "seasonal_features": [f for f in new_features if any(s in f for s in ['month_avg', 'dow_avg', 'hour_avg'])]
+        }
+        
+        print(f"\n📋 FEATURE CATEGORIES:")
+        for category, features in feature_categories.items():
+            if features:
+                print(f"   {category}: {len(features)} features")
+        
+        # Save detailed report
+        report_path = f"outputs/time_features_report_{int(time.time())}.json"
+        report_data = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "dataset": dataset,
+            "date_column": date_column,
+            "windows": window_list,
+            "lags": lag_list,
+            "include_seasonality": include_seasonality,
+            "original_shape": df.shape,
+            "final_shape": df_ts.shape,
+            "new_features": new_features,
+            "feature_categories": {k: v for k, v in feature_categories.items() if v},
+            "rows_dropped": initial_rows - final_rows
+        }
+        
+        with open(report_path, "w") as f:
+            json.dump(report_data, f, indent=2)
+        print(f"📋 Time-series report saved to: {report_path}")
+        
+    except Exception as e:
+        print(f"❌ Time-series feature engineering failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+def extract_dataset_from_prompt(prompt: str) -> str:
+    """Extract dataset name from engineering prompt"""
+    import re
+    
+    # Look for dataset specification
+    dataset_match = re.search(r"(?:dataset|data|for)\s+(\w+)", prompt.lower())
+    if dataset_match:
+        return dataset_match.group(1)
+    
+    # Default dataset for testing
+    return "iris"
+
+
 if __name__ == "__main__":
     app()
