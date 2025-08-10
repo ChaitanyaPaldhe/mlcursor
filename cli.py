@@ -441,6 +441,17 @@ def benchmark(
     print(f"📁 Results and visualizations saved in outputs/ directory")
 
 @app.command()
+def deploy_fastapi(
+    model_path: str = typer.Argument(..., help="Path to trained model file (.joblib/.pkl)"),
+    output_dir: str = typer.Option("deployment_fastapi", "--output", "-o", help="Directory to save deployment files"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port for the FastAPI server")
+):
+    """Generate a FastAPI app for serving the trained model."""
+    from core.fastapi_deployer import generate_fastapi_app
+    generate_fastapi_app(model_path, output_dir, port)
+    print(f"✅ FastAPI deployment files created in '{output_dir}'")
+
+@app.command()
 def advisor(
     dataset: str = typer.Argument(..., help="Dataset to analyze"),  # FIXED: Made dataset a required argument
     detailed: bool = typer.Option(True, "--detailed/--summary", help="Show detailed analysis"),
