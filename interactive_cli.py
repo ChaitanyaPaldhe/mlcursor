@@ -54,6 +54,26 @@ class EpochInteractiveCLI:
                 r'(?:analyze|advisor?|recommend)\s+(?:models?\s+(?:for\s+)?)?(.+?)(?:\s+dataset)?(?:\s+(?:with|using)\s+(.+))?$',
                 r'what\s+(?:models?|algorithms?)\s+(?:should\s+i\s+use\s+(?:for\s+)?|work\s+best\s+(?:for\s+)?)?(.+?)(?:\s+dataset)?(?:\s+(?:with|using)\s+(.+))?$',
                 r'suggest\s+(?:models?\s+(?:for\s+)?)?(.+?)(?:\s+dataset)?(?:\s+(?:with|using)\s+(.+))?$'
+            ],
+            'engineer': [
+                r'engineer\s+features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'create\s+features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'generate\s+features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'build\s+features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'make\s+(?:polynomial|mathematical|statistical)\s+features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?'
+            ],
+            'select': [
+                r'select\s+(?:top\s+)?(\d+)?\s*features?\s+(?:from\s+)?(.+?)(?:\s+(?:using|with|method)\s+(.+))?',
+                r'choose\s+(?:best\s+)?(\d+)?\s*features?\s+(?:from\s+)?(.+?)(?:\s+(?:using|with|method)\s+(.+))?',
+                r'pick\s+(?:top\s+)?(\d+)?\s*features?\s+(?:from\s+)?(.+?)(?:\s+(?:using|with|method)\s+(.+))?',
+                r'filter\s+features?\s+(?:from\s+)?(.+?)(?:\s+(?:keep|select)\s+(\d+))?(?:\s+(?:using|with|method)\s+(.+))?'
+            ],
+            'time_features': [
+                r'create\s+time\s+(?:series\s+)?features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'engineer\s+time\s+(?:series\s+)?features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'generate\s+temporal\s+features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'time\s+series\s+engineering\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?',
+                r'(?:add|create)\s+(?:rolling|lag|window)\s+features?\s+(?:for\s+)?(.+?)(?:\s+(?:with|using)\s+(.+))?'
             ]
         }
         
@@ -201,6 +221,13 @@ class EpochInteractiveCLI:
   advisor <dataset>                        Get intelligent model suggestions
   recommend <dataset>                      Suggest best models for dataset
 
+🔧 FEATURE ENGINEERING COMMANDS:
+  engineer features for <dataset> [strategy]         Comprehensive feature engineering
+  create polynomial features for <dataset>           Create polynomial/interaction features
+  generate mathematical features for <dataset>       Create log, sqrt, square transforms
+  select top N features from <dataset> [method]      Feature selection
+  create time features for <dataset> [windows]       Time series feature engineering
+
 🛠️  UTILITY COMMANDS:
   list models [framework]                   Show available models
   list datasets                            Show known datasets
@@ -208,6 +235,14 @@ class EpochInteractiveCLI:
   history                                  Show command history
   clear                                    Clear screen
   exit / quit                              Exit the CLI
+
+🎯 FEATURE ENGINEERING EXAMPLES:
+  • engineer features for penguins comprehensive strategy
+  • create polynomial features degree 3 for wine
+  • select top 50 features from titanic using recursive
+  • generate mathematical features log sqrt for diabetes
+  • create time features for stock_data with 7d 30d windows
+  • engineer features for iris with aggressive polynomial strategy
 
 🎯 NATURAL LANGUAGE EXAMPLES:
   • train a random forest on penguins
@@ -217,12 +252,15 @@ class EpochInteractiveCLI:
   • recommend models for iris
   • benchmark iris with sklearn models
 
-⚙️  OPTIONS (can be mixed into commands):
-  • with cv / with cross-validation         Enable cross-validation
-  • with N-fold cv                          Specify CV folds
-  • with N trials                           Set HPO trials
-  • framework sklearn/xgboost/lightgbm      Filter by framework
-  • stratified cv / kfold cv                CV strategy
+⚙️  FEATURE ENGINEERING OPTIONS:
+  • comprehensive/basic/custom strategy      Feature engineering complexity
+  • degree N                               Polynomial degree (2-4)
+  • interaction only                       Only interaction terms
+  • aggressive/conservative                Polynomial strategy
+  • using recursive/univariate/model_based Selection method
+  • top N features                         Number of features to select
+  • with Nd windows                        Time series windows (7d, 30d, etc.)
+  • mathematical log sqrt square           Math transformations
 
 📁 AVAILABLE MODELS: {}
 
@@ -358,95 +396,141 @@ class EpochInteractiveCLI:
     def extract_parameters(self, full_command: str, model_part: str, dataset_part: str, options_part: str) -> Dict:
         """IMPROVED: Extract parameters from command components with better model list handling"""
         params = {}
-        
-        # FIXED: Extract models (handle comma-separated lists better)
+    
+    # FIXED: Extract models (handle comma-separated lists better)
         if model_part:
             model_part = model_part.strip()
-            
-            # Check if this looks like a comma-separated list of models
+        
+        # Check if this looks like a comma-separated list of models
             if ',' in model_part:
                 # Split by comma and clean each model name
                 model_candidates = [m.strip() for m in model_part.split(',')]
                 valid_models = []
                 available_models = get_available_models()
-                
+            
                 for candidate in model_candidates:
-                    # Clean the candidate name
+                # Clean the candidate name
                     clean_candidate = re.sub(r'\b(a|an|the|model|classifier|regressor)\b', '', candidate, flags=re.IGNORECASE).strip()
                     clean_candidate = re.sub(r'\s+', '_', clean_candidate)
-                    
-                    # Try to match with available models
+                
+                # Try to match with available models
                     best_match = None
                     best_score = 0
-                    
+                
                     for model in available_models:
-                        # Exact match
+                    # Exact match
                         if model.lower() == clean_candidate.lower():
                             best_match = model
                             best_score = 1.0
                             break
-                        # Partial match
+                    # Partial match
                         elif clean_candidate.lower() in model.lower() or model.lower() in clean_candidate.lower():
                             score = len(clean_candidate) / max(len(model), len(clean_candidate))
                             if score > best_score:
                                 best_match = model
                                 best_score = score
-                    
+                
                     if best_match and best_score > 0.5:
                         valid_models.append(best_match)
                     else:
-                        # Try the original candidate as-is
+                    # Try the original candidate as-is
                         valid_models.append(clean_candidate)
-                
+            
                 params['models'] = valid_models
             else:
-                # Single model - existing logic
-                # Remove articles and common words
+            # Single model - existing logic
+            # Remove articles and common words
                 model_part = re.sub(r'\b(a|an|the|model|classifier|regressor)\b', '', model_part, flags=re.IGNORECASE).strip()
                 model_part = re.sub(r'\s+', '_', model_part)
 
-                # Try to match with available models (fuzzy matching)
+            # Try to match with available models (fuzzy matching)
                 available_models = get_available_models()
                 best_match = None
                 best_score = 0
-                
+            
                 for model in available_models:
-                    # Exact match
+                # Exact match
                     if model.lower() == model_part.lower():
                         best_match = model
                         best_score = 1.0
                         break
-                    # Partial match
+                # Partial match
                     elif model_part.lower() in model.lower() or model.lower() in model_part.lower():
                         score = len(model_part) / max(len(model), len(model_part))
                         if score > best_score:
                             best_match = model
                             best_score = score
-                
+            
                 if best_match and best_score > 0.5:
                     params['model'] = best_match
                 else:
-                    # If no good match, use the cleaned model part
+                # If no good match, use the cleaned model part
                     params['model'] = model_part
-        
-        # Handle framework specification (e.g., "sklearn models", "xgboost models")
+    
+    # Handle framework specification (e.g., "sklearn models", "xgboost models")
         if model_part and ('models' in model_part or 'framework' in full_command):
             framework_match = re.search(r'(sklearn|xgboost|lightgbm|tensorflow|pytorch|catboost)\s+models?', model_part, re.IGNORECASE)
             if framework_match:
                 params['framework'] = framework_match.group(1).lower()
-                # Remove the model specification since we're using framework
+            # Remove the model specification since we're using framework
                 if 'model' in params:
                     del params['model']
                 if 'models' in params:
                     del params['models']
-        
-        # IMPROVED: Extract dataset with better matching
+    
+    # FIXED: Extract dataset with better matching for feature engineering commands
         if dataset_part:
-            matched_dataset = self.match_dataset_name(dataset_part)
-            if matched_dataset:
-                params['dataset'] = matched_dataset
+        # Clean the dataset part more aggressively for feature engineering commands
+            dataset_part = dataset_part.strip()
         
-        # Extract cross-validation settings
+        # For feature engineering commands, handle "features for penguins dataset" pattern
+            if 'features' in full_command and 'for' in full_command:
+            # Look for the pattern "for <dataset_name> dataset" or just "for <dataset_name>"
+                for_pattern = re.search(r'\bfor\s+(\w+)(?:\s+dataset)?\b', full_command, re.IGNORECASE)
+                if for_pattern:
+                    dataset_candidate = for_pattern.group(1)
+                    matched_dataset = self.match_dataset_name(dataset_candidate)
+                    if matched_dataset:
+                        params['dataset'] = matched_dataset
+                    else:
+                        params['dataset'] = dataset_candidate
+                else:
+                # Fallback to original logic
+                    matched_dataset = self.match_dataset_name(dataset_part)
+                    if matched_dataset:
+                        params['dataset'] = matched_dataset
+            else:
+            # Original dataset extraction logic for other commands
+                matched_dataset = self.match_dataset_name(dataset_part)
+                if matched_dataset:
+                    params['dataset'] = matched_dataset
+    
+    # ADDITIONAL FIX: If no dataset found yet, try to extract from the full command
+        if not params.get('dataset'):
+        # Try alternative patterns for feature engineering
+            alt_patterns = [
+                r'engineer\s+features?\s+(?:for\s+)?(\w+)',
+                r'features?\s+(?:for\s+)?(\w+)(?:\s+dataset)?',
+                r'(?:for\s+)?(\w+)(?:\s+dataset)?\s+with',
+                r'(?:using\s+)?(\w+)(?:\s+dataset)?\s+(?:create|generate|build)'
+            ]
+        
+            for pattern in alt_patterns:
+                match = re.search(pattern, full_command, re.IGNORECASE)
+                if match:
+                    candidate = match.group(1)
+                # Skip common words that aren't datasets
+                    if candidate.lower() not in ['features', 'feature', 'polynomial', 'mathematical', 'statistical']:
+                        matched_dataset = self.match_dataset_name(candidate)
+                        if matched_dataset:
+                            params['dataset'] = matched_dataset
+                            break
+                    # If it's in known datasets, use it directly
+                        elif candidate.lower() in self.known_datasets:
+                            params['dataset'] = candidate.lower()
+                            break
+    
+    # Extract cross-validation settings
         cv_match = re.search(r'(\d+)[-\s]*fold\s+(?:cv|cross.?validation)', full_command, re.IGNORECASE)
         if cv_match:
             params['cv_folds'] = int(cv_match.group(1))
@@ -454,23 +538,106 @@ class EpochInteractiveCLI:
         elif re.search(r'\b(?:cv|cross.?validation)\b', full_command, re.IGNORECASE):
             params['use_cv'] = True
             params['cv_folds'] = 5  # default
-        
-        # Extract CV strategy
+    
+    # Extract CV strategy
         if re.search(r'stratified', full_command, re.IGNORECASE):
             params['cv_type'] = 'stratified'
         elif re.search(r'kfold|k.fold', full_command, re.IGNORECASE):
             params['cv_type'] = 'kfold'
-        
-        # Extract number of trials for hyperparameter optimization
+    
+    # Extract number of trials for hyperparameter optimization
         trials_match = re.search(r'(\d+)\s+trials?', full_command, re.IGNORECASE)
         if trials_match:
             params['n_trials'] = int(trials_match.group(1))
-        
-        # Extract framework filter
+    
+    # Extract framework filter
         framework_match = re.search(r'framework\s+(\w+)', full_command, re.IGNORECASE)
         if framework_match:
             params['framework'] = framework_match.group(1)
-        
+    
+        if re.search(r'\b(basic|simple)\b', full_command, re.IGNORECASE):
+            params['strategy'] = 'basic'
+        elif re.search(r'\b(custom|specific)\b', full_command, re.IGNORECASE):
+            params['strategy'] = 'custom'
+        elif re.search(r'\b(comprehensive|complete|full)\b', full_command, re.IGNORECASE):
+            params['strategy'] = 'comprehensive'
+        else:
+            params['strategy'] = 'comprehensive'  # Default
+
+    # Extract polynomial settings
+        if re.search(r'\bpolynomial\b', full_command, re.IGNORECASE):
+            degree_match = re.search(r'degree\s*(\d+)', full_command, re.IGNORECASE)
+            if degree_match:
+                params['degree'] = int(degree_match.group(1))
+    
+            if re.search(r'\binteraction\s*only\b', full_command, re.IGNORECASE):
+                params['interaction_only'] = True
+    
+            if re.search(r'\baggressive\b', full_command, re.IGNORECASE):
+                params['polynomial_strategy'] = 'aggressive'
+            elif re.search(r'\bconservative\b', full_command, re.IGNORECASE):
+                params['polynomial_strategy'] = 'conservative'
+
+    # Extract mathematical functions
+        math_functions = []
+        if re.search(r'\blog\b', full_command, re.IGNORECASE):
+            math_functions.append('log')
+        if re.search(r'\bsqrt\b', full_command, re.IGNORECASE):
+            math_functions.append('sqrt')
+        if re.search(r'\bsquare\b', full_command, re.IGNORECASE):
+            math_functions.append('square')
+        if re.search(r'\breciprocal\b', full_command, re.IGNORECASE):
+            math_functions.append('reciprocal')
+
+        if math_functions:
+            params['mathematical_functions'] = math_functions
+
+    # Extract selection method and k
+        selection_methods = ['univariate', 'recursive', 'model_based', 'correlation', 'variance']
+        for method in selection_methods:
+            if method.replace('_', ' ') in full_command.lower() or method in full_command.lower():
+                params['method'] = method
+                break
+
+    # Extract number of features to select
+        k_match = re.search(r'(?:top|best|select)\s*(\d+)', full_command, re.IGNORECASE)
+        if k_match:
+            params['k'] = int(k_match.group(1))
+
+    # Extract time series specific parameters
+        if re.search(r'\btime\s*series\b|\btemporal\b|\bwindow\b', full_command, re.IGNORECASE):
+            # Extract windows
+            window_matches = re.findall(r'(\d+[dwmy])', full_command.lower())
+            if window_matches:
+                params['windows'] = [w.upper() for w in window_matches]
+    
+        # Extract lags
+            lag_matches = re.findall(r'lag\s*(\d+)', full_command.lower())
+            if lag_matches:
+                params['lags'] = [int(l) for l in lag_matches]
+    
+        # Extract date column
+            date_match = re.search(r'date[_\s]?(?:column|col)?\s*[:=]\s*(\w+)', full_command.lower())
+            if date_match:
+                params['date_column'] = date_match.group(1)
+
+    # Extract binning parameters
+        if re.search(r'\bbin\b', full_command, re.IGNORECASE):
+            bins_match = re.search(r'(\d+)\s*bins?', full_command.lower())
+            if bins_match:
+                params['n_bins'] = int(bins_match.group(1))
+
+    # Extract clustering parameters
+        if re.search(r'\bcluster\b', full_command, re.IGNORECASE):
+            clusters_match = re.search(r'(\d+)\s*clusters?', full_command.lower())
+            if clusters_match:
+                params['n_clusters'] = int(clusters_match.group(1))
+
+    # Extract target column
+        target_match = re.search(r'target[_\s]?(?:column|col)?\s*[:=]\s*(\w+)', full_command.lower())
+        if target_match:
+            params['target_column'] = target_match.group(1)
+    
         return params
 
     def validate_and_enhance_params(self, action: str, params: Dict) -> Dict:
@@ -531,6 +698,17 @@ class EpochInteractiveCLI:
             # FIXED: Enhanced validation for advisor command
             if not enhanced_params.get('dataset'):
                 print("🤔 No dataset specified for advisor.")
+                dataset = self.prompt_for_dataset()
+                if dataset:
+                    enhanced_params['dataset'] = dataset
+                else:
+                    print("❌ Dataset selection cancelled")
+                    return {}
+        
+        elif action in ['engineer', 'select', 'time_features']:
+            # Check for required dataset for feature engineering commands
+            if not enhanced_params.get('dataset'):
+                print("🤔 No dataset specified for feature engineering.")
                 dataset = self.prompt_for_dataset()
                 if dataset:
                     enhanced_params['dataset'] = dataset
@@ -694,6 +872,129 @@ class EpochInteractiveCLI:
             print("💡 Make sure the dataset name is correct")
             print("💡 Available datasets: iris, wine, breast_cancer, penguins, etc.")
 
+    def handle_engineer_command(self, params: Dict):
+        """Handle feature engineering commands"""
+        params = self.validate_and_enhance_params('engineer', params)
+        if not params:
+            return
+        
+        dataset = params.get('dataset')
+        strategy = params.get('strategy', 'comprehensive')
+        operations = params.get('operations', [])
+        
+        print(f"🔧 Engineering features for {dataset} using {strategy} strategy")
+        
+        try:
+            from cli import engineer
+            prompt = f"engineer features for {dataset}"
+            if strategy != 'comprehensive':
+                prompt += f" strategy {strategy}"
+            
+            if operations:
+                op_strings = []
+                for op in operations:
+                    if op['type'] == 'polynomial':
+                        op_str = f"polynomial degree {op.get('degree', 2)}"
+                        if op.get('interaction_only'):
+                            op_str += " interaction only"
+                        op_strings.append(op_str)
+                    elif op['type'] == 'mathematical':
+                        functions = op.get('functions', ['log', 'sqrt'])
+                        op_strings.append(f"mathematical {' '.join(functions)}")
+                    elif op['type'] == 'selection':
+                        method = op.get('method', 'univariate')
+                        k = op.get('k', 50)
+                        op_strings.append(f"select top {k} using {method}")
+                
+                if op_strings:
+                    prompt += f" with {', '.join(op_strings)}"
+            
+            engineer(
+                prompt=prompt,
+                dataset=dataset,
+                output=f"engineered_{dataset}.csv",
+                save_importance=True,
+                show_report=True,
+                target_column=params.get('target_column')
+            )
+            
+            self.session_data['datasets_used'].add(dataset)
+            self.session_data['last_dataset'] = dataset
+            self.session_data['command_count'] += 1
+            
+        except ImportError:
+            print("❌ Feature engineering module not available")
+        except Exception as e:
+            print(f"❌ Feature engineering failed: {e}")
+            print("💡 Check if the dataset name is correct")
+
+    def handle_select_command(self, params: Dict):
+        """Handle feature selection commands"""
+        params = self.validate_and_enhance_params('select', params)
+        if not params:
+            return
+        
+        dataset = params.get('dataset')
+        method = params.get('method', 'univariate')
+        k = params.get('k', 50)
+        
+        print(f"🎯 Selecting top {k} features from {dataset} using {method} method")
+        
+        try:
+            from cli import select
+            select(
+                dataset=dataset,
+                method=method,
+                k=k,
+                target_column=params.get('target_column'),
+                output=f"selected_{dataset}.csv",
+                show_importance=True
+            )
+            
+            self.session_data['datasets_used'].add(dataset)
+            self.session_data['last_dataset'] = dataset
+            self.session_data['command_count'] += 1
+            
+        except ImportError:
+            print("❌ Feature selection module not available")
+        except Exception as e:
+            print(f"❌ Feature selection failed: {e}")
+
+    def handle_time_features_command(self, params: Dict):
+        """Handle time series feature engineering commands"""
+        params = self.validate_and_enhance_params('time_features', params)
+        if not params:
+            return
+        
+        dataset = params.get('dataset')
+        date_column = params.get('date_column', 'date')
+        windows = params.get('windows', ['7D', '30D'])
+        lags = params.get('lags', [1, 7, 30])
+        
+        print(f"📅 Creating time series features for {dataset}")
+        print(f"   Windows: {', '.join(windows)}")
+        print(f"   Lags: {', '.join(map(str, lags))}")
+        
+        try:
+            from cli import time_features
+            time_features(
+                dataset=dataset,
+                date_column=date_column,
+                windows=','.join(windows),
+                lags=','.join(map(str, lags)),
+                output=f"time_features_{dataset}.csv",
+                include_seasonality=params.get('include_seasonality', True)
+            )
+            
+            self.session_data['datasets_used'].add(dataset)
+            self.session_data['last_dataset'] = dataset
+            self.session_data['command_count'] += 1
+            
+        except ImportError:
+            print("❌ Time series feature engineering module not available")
+        except Exception as e:
+            print(f"❌ Time series feature engineering failed: {e}")
+
     def prompt_for_model(self) -> Optional[str]:
         """Interactive model selection"""
         available_models = get_available_models()
@@ -790,6 +1091,15 @@ class EpochInteractiveCLI:
 
             elif action == 'advisor':
                 self.handle_advisor_command(params)
+            
+            elif action == 'engineer':
+                self.handle_engineer_command(params)
+        
+            elif action == 'select':
+                self.handle_select_command(params)
+        
+            elif action == 'time_features':
+                self.handle_time_features_command(params)
 
             elif action == 'unknown':
                 original_cmd = params.get('original_command', '')
@@ -839,7 +1149,14 @@ class EpochInteractiveCLI:
             'xgbost': 'xgboost', 'xgboost': 'xgboost',
             'lgbm': 'lightgbm', 'lightbgm': 'lightgbm',
             'analze': 'analyze', 'analize': 'analyze',
-            'advisr': 'advisor', 'advise': 'advisor'
+            'advisr': 'advisor', 'advise': 'advisor',
+            'enginer': 'engineer', 'enginr': 'engineer', 'enginer': 'engineer',
+            'featur': 'feature', 'featurs': 'features', 'fetures': 'features',
+            'polinomial': 'polynomial', 'polynominal': 'polynomial',
+            'selct': 'select', 'slect': 'select', 'selet': 'select',
+            'mathmetical': 'mathematical', 'mathmatical': 'mathematical',
+            'statistcal': 'statistical', 'statistic': 'statistical',
+            'tmie': 'time', 'serie': 'series', 'series': 'series'
         }
         
         # Check for direct typo corrections

@@ -1,0 +1,582 @@
+# templates/feature_engineering_template.py.j2
+
+#!/usr/bin/env python3
+"""
+Automated Feature Engineering Script
+Generated from prompt: {{ prompt }}
+Strategy: {{ strategy }}
+{% if operations %}Operations: {{ operations }}{% endif %}
+"""
+
+import pandas as pd
+import numpy as np
+import warnings
+from datetime import datetime
+import os
+warnings.filterwarnings('ignore')
+
+# Import required libraries based on operations
+{% if strategy == 'comprehensive' or 'polynomial' in operations_str %}
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+{% endif %}
+{% if 'select' in operations_str or strategy == 'comprehensive' %}
+from sklearn.feature_selection import SelectKBest, f_classif, f_regression, RFE, SelectFromModel
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+{% endif %}
+{% if 'clustering' in operations_str or strategy == 'comprehensive' %}
+from sklearn.cluster import KMeans
+{% endif %}
+
+def load_dataset():
+    """Load the dataset for feature engineering"""
+    try:
+        # Try loading from CSV first
+        df = pd.read_csv("data/{{ dataset }}.csv")
+        print(f"✅ Loaded dataset from data/{{ dataset }}.csv")
+        return df
+    except FileNotFoundError:
+        pass
+    
+    # Try seaborn datasets
+    try:
+        import seaborn as sns
+        df = sns.load_dataset("{{ dataset }}").dropna()
+        print(f"✅ Loaded {{ dataset }} from seaborn")
+        return df
+    except:
+        pass
+    
+    # Try sklearn datasets
+    try:
+        {% if dataset == 'iris' %}
+        from sklearn.datasets import load_iris
+        sklearn_data = load_iris()
+        {% elif dataset == 'wine' %}
+        from sklearn.datasets import load_wine
+        sklearn_data = load_wine()
+        {% elif dataset == 'breast_cancer' %}
+        from sklearn.datasets import load_breast_cancer
+        sklearn_data = load_breast_cancer()
+        {% elif dataset == 'digits' %}
+        from sklearn.datasets import load_digits
+        sklearn_data = load_digits()
+        {% elif dataset == 'diabetes' %}
+        from sklearn.datasets import load_diabetes
+        sklearn_data = load_diabetes()
+        {% else %}
+        raise ValueError("Dataset not found")
+        {% endif %}
+        
+        df = pd.DataFrame(
+            sklearn_data.data,
+            columns=sklearn_data.feature_names if hasattr(sklearn_data, 'feature_names') else 
+                    [f'feature_{i}' for i in range(sklearn_data.data.shape[1])]
+        )
+        df['target'] = sklearn_data.target
+        print(f"✅ Loaded {{ dataset }} from sklearn")
+        return df
+    except:
+        pass
+    
+    raise ValueError(f"Dataset '{{ dataset }}' not found")
+
+def handle_missing_values(X, strategy='{{ missing_strategy | default("simple") }}'):
+    """Handle missing values"""
+    {% if missing_strategy == 'advanced' %}
+    # Advanced missing value handling
+    for col in X.columns:
+        if X[col].isnull().any():
+            # Create missing indicator
+            X[f"{col}_is_missing"] = X[col].isnull().astype(int)
+            
+            # Impute based on type
+            if X[col].dtype in [np.number]:
+                X[col].fillna(X[col].median(), inplace=True)
+            else:
+                X[col].fillna(X[col].mode().iloc[0] if not X[col].mode().empty else 'unknown', inplace=True)
+    {% else %}
+    # Simple missing value handling
+    numerical_cols = X.select_dtypes(include=[np.number]).columns
+    categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+    
+    # Fill numerical with median
+    for col in numerical_cols:
+        if X[col].isnull().any():
+            X[col].fillna(X[col].median(), inplace=True)
+    
+    # Fill categorical with mode
+    for col in categorical_cols:
+        if X[col].isnull().any():
+            X[col].fillna(X[col].mode().iloc[0] if not X[col].mode().empty else 'unknown', inplace=True)
+    {% endif %}
+    
+    return X
+
+def encode_categorical_features(X, y=None, strategy='{{ encoding_strategy | default("basic") }}'):
+    """Encode categorical features"""
+    categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+    
+    for col in categorical_cols:
+        unique_values = X[col].nunique()
+        
+        {% if encoding_strategy == 'advanced' %}
+        if unique_values <= 5:
+            # One-hot encoding for low cardinality
+            dummies = pd.get_dummies(X[col], prefix=col)
+            X = pd.concat([X, dummies], axis=1)
+            X.drop(col, axis=1, inplace=True)
+        elif unique_values <= 20 and y is not None:
+            # Target encoding for medium cardinality
+            global_mean = y.mean()
+            target_mapping = y.groupby(X[col]).mean()
+            X[col] = X[col].map(target_mapping).fillna(global_mean)
+        else:
+            # Label encoding for high cardinality
+            X[col] = pd.Categorical(X[col]).codes
+        {% else %}
+        if unique_values <= 10:
+            # One-hot encoding
+            dummies = pd.get_dummies(X[col], prefix=col)
+            X = pd.concat([X, dummies], axis=1)
+            X.drop(col, axis=1, inplace=True)
+        else:
+            # Label encoding
+            X[col] = pd.Categorical(X[col]).codes
+        {% endif %}
+    
+    return X
+
+{% if 'polynomial' in operations_str or strategy == 'comprehensive' %}
+def create_polynomial_features(X, degree={{ degree | default(2) }}, interaction_only={{ interaction_only | default(False) | python_bool }}):
+    """Create polynomial and interaction features"""
+    numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    
+    if len(numerical_cols) < 2:
+        print("⚠️  Not enough numerical features for polynomial expansion")
+        return X
+    
+    # Limit features to prevent explosion
+    if len(numerical_cols) > 10:
+        numerical_cols = numerical_cols[:10]
+        print(f"⚠️  Limited to first 10 numerical features to prevent feature explosion")
+    
+    print(f"🔢 Creating polynomial features (degree={{ degree | default(2) }}, interaction_only={{ interaction_only | default(False) }})")
+    
+    X_subset = X[numerical_cols].copy()
+    poly = PolynomialFeatures(
+        degree={{ degree | default(2) }},
+        interaction_only={{ interaction_only | default(False) | python_bool }},
+        include_bias=False
+    )
+    
+    X_poly = poly.fit_transform(X_subset)
+    feature_names = poly.get_feature_names_out(numerical_cols)
+    
+    # Create new dataframe with polynomial features
+    X_poly_df = pd.DataFrame(X_poly, columns=feature_names, index=X.index)
+    
+    # Remove original numerical features and add polynomial ones
+    X_result = X.drop(columns=numerical_cols)
+    X_result = pd.concat([X_result, X_poly_df], axis=1)
+    
+    print(f"✨ Created {len(feature_names) - len(numerical_cols)} new polynomial features")
+    return X_result
+{% endif %}
+
+{% if 'mathematical' in operations_str or strategy == 'comprehensive' %}
+def create_mathematical_features(X, functions={{ functions | default(['log', 'sqrt', 'square']) }}):
+    """Create mathematical transformation features"""
+    numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    functions = {{ functions | default(['log', 'sqrt', 'square']) }}
+    
+    print(f"🧮 Creating mathematical features: {functions}")
+    created_count = 0
+    
+    for col in numerical_cols:
+        col_data = X[col]
+        
+        if 'log' in functions and (col_data > 0).all():
+            X[f"{col}_log"] = np.log(col_data)
+            created_count += 1
+        
+        if 'sqrt' in functions and (col_data >= 0).all():
+            X[f"{col}_sqrt"] = np.sqrt(col_data)
+            created_count += 1
+        
+        if 'square' in functions:
+            X[f"{col}_squared"] = col_data ** 2
+            created_count += 1
+        
+        if 'reciprocal' in functions and (col_data != 0).all():
+            X[f"{col}_reciprocal"] = 1 / col_data
+            created_count += 1
+    
+    print(f"✨ Created {created_count} mathematical transformation features")
+    return X
+{% endif %}
+
+{% if 'statistical' in operations_str or strategy == 'comprehensive' %}
+def create_statistical_features(X):
+    """Create statistical aggregation features"""
+    numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    
+    if len(numerical_cols) < 2:
+        print("⚠️  Not enough numerical features for statistical aggregations")
+        return X
+    
+    print(f"📊 Creating statistical features from {len(numerical_cols)} numerical columns")
+    
+    X_numerical = X[numerical_cols]
+    
+    # Row-wise statistics
+    X["row_mean"] = X_numerical.mean(axis=1)
+    X["row_std"] = X_numerical.std(axis=1)
+    X["row_max"] = X_numerical.max(axis=1)
+    X["row_min"] = X_numerical.min(axis=1)
+    X["row_median"] = X_numerical.median(axis=1)
+    X["row_sum"] = X_numerical.sum(axis=1)
+    
+    created_count = 6
+    
+    # Feature ratios (limited to prevent explosion)
+    if len(numerical_cols) >= 2:
+        ratio_count = 0
+        for i, col1 in enumerate(numerical_cols[:5]):
+            for col2 in numerical_cols[i+1:6]:
+                if (X[col2] != 0).all():
+                    X[f"{col1}_{col2}_ratio"] = X[col1] / X[col2]
+                    ratio_count += 1
+                    created_count += 1
+        
+        print(f"   • Created {ratio_count} ratio features")
+    
+    print(f"✨ Created {created_count} statistical features")
+    return X
+{% endif %}
+
+{% if 'clustering' in operations_str or strategy == 'comprehensive' %}
+def create_clustering_features(X, n_clusters={{ n_clusters | default(5) }}):
+    """Create clustering-based features"""
+    numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    
+    if len(numerical_cols) < 2:
+        print("⚠️  Not enough numerical features for clustering")
+        return X
+    
+    print(f"🎯 Creating clustering features (k={{ n_clusters | default(5) }})")
+    
+    # Standardize features for clustering
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X[numerical_cols])
+    
+    # Apply K-means clustering
+    kmeans = KMeans(n_clusters={{ n_clusters | default(5) }}, random_state=42, n_init=10)
+    cluster_labels = kmeans.fit_predict(X_scaled)
+    
+    # Add cluster labels
+    X[f"cluster_{n_clusters | default(5)}"] = cluster_labels
+    
+    # Add distances to cluster centers
+    cluster_centers = kmeans.cluster_centers_
+    distances = np.linalg.norm(X_scaled[:, np.newaxis] - cluster_centers, axis=2)
+    
+    for i in range({{ n_clusters | default(5) }}):
+        X[f"dist_to_cluster_{i}"] = distances[:, i]
+    
+    created_count = 1 + {{ n_clusters | default(5) }}
+    print(f"✨ Created {created_count} clustering features")
+    return X
+{% endif %}
+
+{% if 'binning' in operations_str %}
+def create_binned_features(X, n_bins={{ n_bins | default(5) }}):
+    """Create binned categorical features"""
+    numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    
+    print(f"📦 Creating binned features ({n_bins | default(5)} bins)")
+    created_count = 0
+    
+    for col in numerical_cols:
+        try:
+            X[f"{col}_binned"] = pd.cut(X[col], bins={{ n_bins | default(5) }}, labels=False)
+            created_count += 1
+        except ValueError:
+            # Handle cases where binning fails
+            X[f"{col}_binned"] = 0
+    
+    print(f"✨ Created {created_count} binned features")
+    return X
+{% endif %}
+
+{% if selection_method %}
+def select_features(X, y, method='{{ selection_method }}', k={{ k | default(50) }}):
+    """Select top k features using specified method"""
+    print(f"🎯 Selecting top {k | default(50)} features using {{ selection_method }}")
+    
+    original_features = len(X.columns)
+    
+    {% if selection_method == 'univariate' %}
+    from sklearn.feature_selection import f_classif, f_regression
+    
+    # Determine score function based on target type
+    if y.dtype == 'object' or y.nunique() < 20:
+        score_func = f_classif
+        task_type = "classification"
+    else:
+        score_func = f_regression
+        task_type = "regression"
+    
+    selector = SelectKBest(score_func=score_func, k=min({{ k | default(50) }}, X.shape[1]))
+    X_selected = selector.fit_transform(X, y)
+    selected_features = X.columns[selector.get_support()].tolist()
+    
+    {% elif selection_method == 'recursive' %}
+    if y.dtype == 'object' or y.nunique() < 20:
+        estimator = RandomForestClassifier(n_estimators=50, random_state=42)
+    else:
+        estimator = RandomForestRegressor(n_estimators=50, random_state=42)
+    
+    selector = RFE(estimator=estimator, n_features_to_select=min({{ k | default(50) }}, X.shape[1]))
+    X_selected = selector.fit_transform(X, y)
+    selected_features = X.columns[selector.get_support()].tolist()
+    
+    {% elif selection_method == 'model_based' %}
+    if y.dtype == 'object' or y.nunique() < 20:
+        estimator = RandomForestClassifier(n_estimators=50, random_state=42)
+    else:
+        from sklearn.linear_model import LassoCV
+        estimator = LassoCV(random_state=42)
+    
+    selector = SelectFromModel(estimator, max_features=min({{ k | default(50) }}, X.shape[1]))
+    X_selected = selector.fit_transform(X, y)
+    selected_features = X.columns[selector.get_support()].tolist()
+    
+    {% elif selection_method == 'correlation' %}
+    # Remove highly correlated features first
+    corr_matrix = X.corr().abs()
+    upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+    to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > 0.95)]
+    
+    X_decorr = X.drop(columns=to_drop)
+    print(f"   Removed {len(to_drop)} highly correlated features")
+    
+    # Select top k by importance if still too many
+    if len(X_decorr.columns) > {{ k | default(50) }}:
+        if y.dtype == 'object' or y.nunique() < 20:
+            rf_model = RandomForestClassifier(n_estimators=50, random_state=42)
+        else:
+            rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
+        
+        rf_model.fit(X_decorr, y)
+        importance_scores = dict(zip(X_decorr.columns, rf_model.feature_importances_))
+        top_features = sorted(importance_scores.items(), key=lambda x: x[1], reverse=True)[: {{ k | default(50) }}]
+        selected_features = [f[0] for f in top_features]
+    else:
+        selected_features = X_decorr.columns.tolist()
+    
+    {% elif selection_method == 'variance' %}
+    from sklearn.feature_selection import VarianceThreshold
+    
+    # Remove low variance features
+    selector = VarianceThreshold(threshold=0.01)
+    X_var = selector.fit_transform(X)
+    var_features = X.columns[selector.get_support()].tolist()
+    
+    print(f"   Removed {len(X.columns) - len(var_features)} low variance features")
+    
+    # Select top k by importance if still too many
+    if len(var_features) > {{ k | default(50) }}:
+        X_var_df = X[var_features]
+        
+        if y.dtype == 'object' or y.nunique() < 20:
+            rf_model = RandomForestClassifier(n_estimators=50, random_state=42)
+        else:
+            rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
+        
+        rf_model.fit(X_var_df, y)
+        importance_scores = dict(zip(X_var_df.columns, rf_model.feature_importances_))
+        top_features = sorted(importance_scores.items(), key=lambda x: x[1], reverse=True)[: {{ k | default(50) }}]
+        selected_features = [f[0] for f in top_features]
+    else:
+        selected_features = var_features
+    {% endif %}
+    
+    X_result = X[selected_features]
+    removed_count = original_features - len(selected_features)
+    
+    print(f"✅ Selected {len(selected_features)} features, removed {removed_count}")
+    return X_result, selected_features
+{% endif %}
+
+def calculate_feature_importance(X, y):
+    """Calculate and display feature importance"""
+    print(f"📊 Calculating feature importance...")
+    
+    # Determine task type
+    if y.dtype == 'object' or y.nunique() < 20:
+        rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+        task_type = "classification"
+    else:
+        rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+        task_type = "regression"
+    
+    # Fit model and get importance
+    rf_model.fit(X, y)
+    importance_scores = dict(zip(X.columns, rf_model.feature_importances_))
+    
+    # Sort by importance
+    sorted_importance = sorted(importance_scores.items(), key=lambda x: x[1], reverse=True)
+    
+    print(f"\n🏆 TOP 15 MOST IMPORTANT FEATURES ({task_type}):")
+    print("-" * 60)
+    for i, (feature, importance) in enumerate(sorted_importance[:15], 1):
+        print(f"{i:2d}. {feature:<35} {importance:.4f}")
+    
+    return importance_scores
+
+def main():
+    """Main feature engineering pipeline"""
+    print("🔧 AUTOMATED FEATURE ENGINEERING")
+    print("=" * 50)
+    print(f"Strategy: {{ strategy }}")
+    print(f"Dataset: {{ dataset }}")
+    {% if operations %}print(f"Operations: {{ operations }}"){% endif %}
+    print("=" * 50)
+    
+    # Load dataset
+    df = load_dataset()
+    print(f"\n📊 Original dataset shape: {df.shape}")
+    
+    # Separate features and target
+    {% if target_column %}
+    if '{{ target_column }}' in df.columns:
+        X = df.drop(columns=['{{ target_column }}'])
+        y = df['{{ target_column }}']
+    {% else %}
+    if 'target' in df.columns:
+        X = df.drop(columns=['target'])
+        y = df['target']
+    else:
+        X = df.drop(columns=[df.columns[-1]])
+        y = df[df.columns[-1]]
+    {% endif %}
+    
+    print(f"🎯 Features: {X.shape[1]}, Target: {y.name} ({y.dtype})")
+    
+    # Feature engineering pipeline
+    engineering_steps = []
+    
+    # 1. Handle missing values
+    print(f"\n1️⃣ Handling missing values...")
+    X = handle_missing_values(X)
+    engineering_steps.append("Missing value imputation")
+    
+    # 2. Encode categorical features
+    print(f"\n2️⃣ Encoding categorical features...")
+    X = encode_categorical_features(X, y)
+    engineering_steps.append("Categorical encoding")
+    
+    {% if 'polynomial' in operations_str or strategy == 'comprehensive' %}
+    # 3. Create polynomial features
+    print(f"\n3️⃣ Creating polynomial features...")
+    X = create_polynomial_features(X)
+    engineering_steps.append("Polynomial features")
+    {% endif %}
+    
+    {% if 'mathematical' in operations_str or strategy == 'comprehensive' %}
+    # 4. Create mathematical features
+    print(f"\n4️⃣ Creating mathematical features...")
+    X = create_mathematical_features(X)
+    engineering_steps.append("Mathematical transformations")
+    {% endif %}
+    
+    {% if 'statistical' in operations_str or strategy == 'comprehensive' %}
+    # 5. Create statistical features
+    print(f"\n5️⃣ Creating statistical features...")
+    X = create_statistical_features(X)
+    engineering_steps.append("Statistical aggregations")
+    {% endif %}
+    
+    {% if 'clustering' in operations_str or strategy == 'comprehensive' %}
+    # 6. Create clustering features
+    print(f"\n6️⃣ Creating clustering features...")
+    X = create_clustering_features(X)
+    engineering_steps.append("Clustering features")
+    {% endif %}
+    
+    {% if 'binning' in operations_str %}
+    # 7. Create binned features
+    print(f"\n7️⃣ Creating binned features...")
+    X = create_binned_features(X)
+    engineering_steps.append("Feature binning")
+    {% endif %}
+    
+    print(f"\n📈 After feature engineering: {X.shape}")
+    
+    {% if selection_method %}
+    # Feature selection
+    print(f"\n🎯 Feature Selection Phase...")
+    X, selected_features = select_features(X, y)
+    engineering_steps.append("Feature selection")
+    print(f"\n📉 After feature selection: {X.shape}")
+    {% endif %}
+    
+    # Calculate feature importance
+    importance_scores = calculate_feature_importance(X, y)
+    
+    # Save results
+    print(f"\n💾 Saving results...")
+    os.makedirs("outputs", exist_ok=True)
+    
+    # Save engineered features
+    output_df = X.copy()
+    output_df['target'] = y
+    output_path = f"outputs/engineered_features_{{ dataset }}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    output_df.to_csv(output_path, index=False)
+    print(f"✅ Engineered features saved to: {output_path}")
+    
+    # Save feature importance
+    importance_path = f"outputs/feature_importance_{{ dataset }}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    import json
+    with open(importance_path, 'w') as f:
+        json.dump(importance_scores, f, indent=2)
+    print(f"✅ Feature importance saved to: {importance_path}")
+    
+    # Save engineering report
+    report = {
+        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "dataset": "{{ dataset }}",
+        "strategy": "{{ strategy }}",
+        {% if operations %}"operations": {{ operations }},{% endif %}
+        "original_shape": df.shape,
+        "final_shape": X.shape,
+        "engineering_steps": engineering_steps,
+        "feature_count_change": X.shape[1] - (df.shape[1] - 1),
+        {% if selection_method %}"selected_features": selected_features,{% endif %}
+        "top_features": list(sorted(importance_scores.items(), key=lambda x: x[1], reverse=True)[:20])
+    }
+    
+    report_path = f"outputs/engineering_report_{{ dataset }}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(report_path, 'w') as f:
+        json.dump(report, f, indent=2)
+    print(f"✅ Engineering report saved to: {report_path}")
+    
+    # Final summary
+    print(f"\n" + "=" * 50)
+    print(f"🎉 FEATURE ENGINEERING COMPLETE")
+    print(f"=" * 50)
+    print(f"📊 Original features: {df.shape[1] - 1}")
+    print(f"📊 Final features: {X.shape[1]}")
+    print(f"📈 Net change: {X.shape[1] - (df.shape[1] - 1):+d}")
+    print(f"🔧 Steps applied: {', '.join(engineering_steps)}")
+    
+    {% if selection_method %}
+    print(f"🎯 Selection method: {{ selection_method }}")
+    print(f"🎯 Features selected: {len(selected_features)}")
+    {% endif %}
+    
+    print(f"💾 Output files saved in outputs/ directory")
+    print(f"=" * 50)
+
+if __name__ == "__main__":
+    main()
