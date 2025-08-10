@@ -3,23 +3,17 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
-{% if config.framework == "xgboost" %}
-import xgboost as xgb
-ModelClass = xgb.XGBClassifier
-{% elif config.framework == "lightgbm" %}
-import lightgbm as lgb
-ModelClass = lgb.LGBMClassifier
-{% else %}
+
 from sklearn.ensemble import RandomForestClassifier
 ModelClass = RandomForestClassifier
-{% endif %}
+
 
 # Load dataset
 try:
-    df = pd.read_csv("data/{{ config.dataset }}.csv")
+    df = pd.read_csv("data/penguins.csv")
 except:
     import seaborn as sns
-    df = sns.load_dataset("{{ config.dataset }}").dropna()
+    df = sns.load_dataset("penguins").dropna()
 
 # Drop rows with missing values
 df.dropna(inplace=True)
@@ -37,14 +31,10 @@ skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 def objective(trial):
     params = {
-        {% if config.framework in ["xgboost", "lightgbm"] %}
+        
         "n_estimators": trial.suggest_int("n_estimators", 50, 300),
         "max_depth": trial.suggest_int("max_depth", 2, 10),
-        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
-        {% else %}
-        "n_estimators": trial.suggest_int("n_estimators", 50, 300),
-        "max_depth": trial.suggest_int("max_depth", 2, 10),
-        {% endif %}
+        
         "max_features": trial.suggest_categorical("max_features", [None, "sqrt", "log2"]),
         "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 5),
         "bootstrap": trial.suggest_categorical("bootstrap", [True, False])

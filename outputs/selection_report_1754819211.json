@@ -1,0 +1,23 @@
+{
+  "timestamp": "2025-08-10 15:16:51",
+  "method": "recursive",
+  "k": 15,
+  "original_features": 5,
+  "selected_features": 5,
+  "removed_features": 0,
+  "feature_importance": {
+    "Id": 0.3537335636071531,
+    "PetalWidthCm": 0.33344764375256175,
+    "PetalLengthCm": 0.25700562904495744,
+    "SepalLengthCm": 0.0514748753883948,
+    "SepalWidthCm": 0.004338288206933025
+  },
+  "selected_feature_list": [
+    "Id",
+    "SepalLengthCm",
+    "SepalWidthCm",
+    "PetalLengthCm",
+    "PetalWidthCm"
+  ],
+  "removed_feature_list": []
+}

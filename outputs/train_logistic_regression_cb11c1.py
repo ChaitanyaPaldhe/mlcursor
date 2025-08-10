@@ -30,12 +30,12 @@ from sklearn.linear_model import LogisticRegression
 model_name = "logistic_regression"
 dataset = "iris"
 optimizer = "sgd"
-lr = 0.1
-epochs = 25
+lr = 0.01
+epochs = 50
 task_type = "classification"
 use_cv = False
 cv_folds = 5
-cv_type = "auto"
+cv_type = "kfold"
 
 print(f"Training {model_name} on {dataset} dataset")
 print(f"Task type: {task_type}")
@@ -293,7 +293,7 @@ model_info_json["training_params"] = {
     "optimizer": optimizer,
     "other_params": {
         
-        "solver": "liblinear",
+        "multi_class": "ovr",
         
         "random_state": 42,
         

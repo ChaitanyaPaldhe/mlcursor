@@ -1,5 +1,5 @@
 {
-  "timestamp": "20250810_142754",
+  "timestamp": "20250810_151007",
   "model_info": {
     "model_name": "logistic_regression",
     "framework": "sklearn",
@@ -12,8 +12,8 @@
     }
   },
   "generated_plots": [
-    "outputs/visualizations\\logistic_regression_feature_importance_20250810_142754.png",
-    "outputs/visualizations\\logistic_regression_confusion_matrix_20250810_142754.png"
+    "outputs/visualizations\\logistic_regression_feature_importance_20250810_151007.png",
+    "outputs/visualizations\\logistic_regression_confusion_matrix_20250810_151007.png"
   ],
   "plot_descriptions": {
     "confusion_matrix": "Shows classification accuracy per class",
