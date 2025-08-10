@@ -1,4 +1,4 @@
-# FastAPI ML Model Deployment
+# FastAPI ML Model Deployment with Preprocessing
 
 ## Quick Start
 
@@ -16,39 +16,26 @@
    - Main endpoint: http://localhost:8000
    - API Documentation: http://localhost:8000/docs
    - Alternative docs: http://localhost:8000/redoc
+   - Preprocessing info: http://localhost:8000/preprocessing-info
 
-## API Endpoints
 
-- `GET /` - Health check and basic info
-- `GET /health` - Detailed health check
-- `POST /predict` - Make predictions
+## Automatic Preprocessing
 
-## Example Usage
+This API automatically applies preprocessing to your input features:
 
-### Using curl:
-```bash
-# Health check
-curl http://localhost:8000/
+1. **Encoding**: Categorical features are encoded using the trained encoder
+2. **Scaling**: Numeric features are scaled using the trained scaler
 
-# Make prediction (adjust features as needed)
-curl -X POST "http://localhost:8000/predict" \
-     -H "Content-Type: application/json" \
-     -d '{"features": [1.0, 2.0, 3.0, 4.0]}'
-```
+**Important**: Send raw, unprocessed features to the API. The preprocessing will be applied automatically.
 
-### Using Python requests:
-```python
-import requests
+### Preprocessing Files:
+- Encoder: `logistic_regression_iris_encoders.pkl`
+- Scaler: `logistic_regression_iris_scaler.pkl`
 
-# Make prediction
-response = requests.post(
-    "http://localhost:8000/predict",
-    json={"features": [1.0, 2.0, 3.0, 4.0]}
-)
-print(response.json())
-```
 
 ## Model Information
-- **Model file:** g:\codes\mlcursor\outputs\models\logistic_regression_iris.pkl
+- **Model file:** logistic_regression_iris.pkl
+- **Encoder file:** logistic_regression_iris_encoders.pkl
+- **Scaler file:** logistic_regression_iris_scaler.pkl
 - **Port:** 8000
-- **Generated:** 2025-08-10 11:07:01
+- **Auto-preprocessing:** ✅ Enabled

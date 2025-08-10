@@ -1,4 +1,4 @@
-# FastAPI ML Model Deployment
+# FastAPI ML Model Deployment with Preprocessing
 
 ## Quick Start
 
@@ -16,39 +16,42 @@
    - Main endpoint: http://localhost:8080
    - API Documentation: http://localhost:8080/docs
    - Alternative docs: http://localhost:8080/redoc
+   - Preprocessing info: http://localhost:8080/preprocessing-info
 
-## API Endpoints
 
-- `GET /` - Health check and basic info
-- `GET /health` - Detailed health check
-- `POST /predict` - Make predictions
+## Automatic Preprocessing
+
+This API automatically applies preprocessing to your input features:
+
+1. **Encoding**: Categorical features are encoded using the trained encoder
+2. **Scaling**: Numeric features are scaled using the trained scaler
+
+**Important**: Send raw, unprocessed features to the API. The preprocessing will be applied automatically.
+
+### Preprocessing Files:
+- Encoder: `logistic_regression_iris_encoders.pkl`
+- Scaler: `logistic_regression_iris_scaler.pkl`
+
+
+## Model Information
+- **Model file:** logistic_regression_iris.pkl
+- **Encoder file:** logistic_regression_iris_encoders.pkl
+- **Scaler file:** logistic_regression_iris_scaler.pkl
+- **Port:** 8080
+- **Auto-preprocessing:** ✅ Enabled
 
 ## Example Usage
 
-### Using curl:
+### Single Prediction
 ```bash
-# Health check
-curl http://localhost:8080/
-
-# Make prediction (adjust features as needed)
 curl -X POST "http://localhost:8080/predict" \
      -H "Content-Type: application/json" \
-     -d '{"features": [1.0, 2.0, 3.0, 4.0]}'
+     -d '{"features": [5.1, 3.5, 1.4, 0.2]}'
 ```
 
-### Using Python requests:
-```python
-import requests
-
-# Make prediction
-response = requests.post(
-    "http://localhost:8080/predict",
-    json={"features": [1.0, 2.0, 3.0, 4.0]}
-)
-print(response.json())
+### Batch Prediction
+```bash
+curl -X POST "http://localhost:8080/predict/batch" \
+     -H "Content-Type: application/json" \
+     -d '{"batch_features": [[5.1, 3.5, 1.4, 0.2], [6.0, 3.0, 4.0, 1.2]]}'
 ```
-
-## Model Information
-- **Model file:** G:\Codes\mlcursor\outputs\models\logistic_regression_iris.pkl
-- **Port:** 8080
-- **Generated:** 2025-08-10 11:29:07

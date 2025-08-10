@@ -6,9 +6,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application
+# Copy the application and model files
 COPY main.py .
 COPY logistic_regression_iris.pkl .
+COPY logistic_regression_iris_encoders.pkl .
+COPY logistic_regression_iris_scaler.pkl .
 
 # Expose the port
 EXPOSE 8080
