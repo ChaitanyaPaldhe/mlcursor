@@ -118,13 +118,19 @@ class EpochInteractiveCLI:
                     matches.extend([model for model in self.suggestions['models'] if model.startswith(text)])
                 
                 # After deploy command, suggest trained model files
-                if 'deploy' in words:
+                if 'deploy' in words or '--model_file' in words:
                     # Look for .joblib and .pkl files in current directory and outputs/
                     model_files = []
-                    for pattern in ['*.joblib', '*.pkl', 'outputs/*.joblib', 'outputs/*.pkl']:
+                    for pattern in ['*.joblib', '*.pkl', 'outputs/*.joblib', 'outputs/*.pkl', 'outputs/models/*.joblib', 'outputs/models/*.pkl']:
                         model_files.extend(glob.glob(pattern))
-                    # Remove directory prefix for cleaner completion
-                    clean_files = [os.path.basename(f) for f in model_files if os.path.basename(f).startswith(text)]
+                    # Remove directory prefix for cleaner completion and add quotes for paths with spaces
+                    clean_files = []
+                    for f in model_files:
+                        basename = os.path.basename(f)
+                        if basename.startswith(text) or f.startswith(text):
+                            # Add quotes if path contains spaces
+                            display_path = f'"{f}"' if ' ' in f else f
+                            clean_files.append(display_path)
                     matches.extend(clean_files)
                 
                 # After 'on' or dataset keywords, suggest datasets
@@ -149,7 +155,7 @@ class EpochInteractiveCLI:
                     matches.extend([combo for combo in common_combos if combo.startswith(text)])
                 
                 # After 'port', suggest common port numbers
-                if 'port' in words:
+                if 'port' in words or '--port' in words:
                     common_ports = ['8000', '8080', '5000', '3000', '9000']
                     matches.extend([port for port in common_ports if port.startswith(text)])
                 
@@ -157,7 +163,8 @@ class EpochInteractiveCLI:
                 common_phrases = [
                     'with cv', 'with cross-validation', 'with 5-fold cv', 'with 10-fold cv',
                     'with 50 trials', 'with 100 trials', 'framework sklearn', 'framework xgboost',
-                    'stratified cv', 'kfold cv', 'port 8000', 'port 8080', 'to deployment_fastapi'
+                    'stratified cv', 'kfold cv', 'port 8000', 'port 8080', 'to deployment_fastapi',
+                    '--model_file', '--output_dir', '--port', '--output', '-o', '-p'
                 ]
                 matches.extend([phrase for phrase in common_phrases if phrase.startswith(text)])
                 
@@ -195,6 +202,7 @@ class EpochInteractiveCLI:
         print("🔄 Use arrow keys for command history, Tab for auto-completion")
         print("💡 Example: 'train a random forest on penguins with 10-fold cv'")
         print("🚀 Example: 'deploy model.joblib to my_api port 8080'")
+        print("🏷️  Example: 'deploy --model_file model.pkl --output_dir my_api --port 8080'")
         print("❌ Type 'exit' or 'quit' to leave")
         print("="*70 + "\n")
 
@@ -209,10 +217,14 @@ class EpochInteractiveCLI:
   compare <models> on <dataset> [options]  Compare multiple models
   benchmark <dataset> [options]            Comprehensive benchmarking
 
-🚀 DEPLOYMENT COMMANDS:
+🚀 DEPLOYMENT COMMANDS (Natural Language):
   deploy <model_file> [to <output_dir>] [port <port>]    Generate FastAPI app
   deploy model.joblib                                    Deploy to default directory
   deploy model.pkl to my_api port 8080                   Custom deployment
+
+🚀 DEPLOYMENT COMMANDS (CLI Style):
+  deploy --model_file <file> --output_dir <dir> --port <port>
+  deploy --model_file "path/to/model.pkl" --output my_api --port 8080
 
 🛠️  UTILITY COMMANDS:
   list models [framework]                   Show available models
@@ -233,6 +245,11 @@ class EpochInteractiveCLI:
   • deploy trained_model.joblib to my_fastapi_app port 9000
   • create fastapi api for model.pkl
 
+🏷️  CLI STYLE EXAMPLES:
+  • deploy --model_file model.pkl --output_dir my_api --port 8080
+  • deploy --model_file "G:\\path\\to\\model.pkl" --output my_api
+  • deploy --model_file outputs/model.joblib --port 9000
+
 ⚙️  OPTIONS (can be mixed into commands):
   • with cv / with cross-validation         Enable cross-validation
   • with N-fold cv                          Specify CV folds
@@ -241,6 +258,9 @@ class EpochInteractiveCLI:
   • stratified cv / kfold cv                CV strategy
   • port NNNN                              Specify deployment port
   • to <directory>                         Specify output directory
+  • --model_file <file>                    CLI-style model file specification
+  • --output_dir <dir>                     CLI-style output directory
+  • --port <port>                          CLI-style port specification
 
 📁 AVAILABLE MODELS: {}
 
@@ -251,9 +271,70 @@ class EpochInteractiveCLI:
         )
         print(help_text)
 
+    def parse_cli_flags(self, command: str) -> Tuple[str, Dict]:
+        """Parse CLI-style flag commands"""
+        try:
+            # Parse command line style arguments
+            parts = shlex.split(command)
+            if not parts:
+                return 'unknown', {}
+            
+            cmd = parts[0].lower()
+            
+            if cmd == 'deploy':
+                params = {'action': 'deploy'}
+                i = 1
+                
+                while i < len(parts):
+                    if parts[i].startswith('--'):
+                        flag = parts[i][2:]  # Remove '--'
+                        if flag == 'model_file' and i + 1 < len(parts):
+                            params['model_file'] = parts[i + 1]
+                            i += 2
+                        elif flag in ['output_dir', 'output'] and i + 1 < len(parts):
+                            params['output_dir'] = parts[i + 1]
+                            i += 2
+                        elif flag == 'port' and i + 1 < len(parts):
+                            params['port'] = int(parts[i + 1])
+                            i += 2
+                        else:
+                            i += 1
+                    elif parts[i].startswith('-') and not parts[i].startswith('--'):
+                        # Handle short flags like -o, -p
+                        flag = parts[i][1:]
+                        if flag == 'o' and i + 1 < len(parts):
+                            params['output_dir'] = parts[i + 1]
+                            i += 2
+                        elif flag == 'p' and i + 1 < len(parts):
+                            params['port'] = int(parts[i + 1])
+                            i += 2
+                        else:
+                            i += 1
+                    else:
+                        # First non-flag argument is model_file
+                        if 'model_file' not in params:
+                            params['model_file'] = parts[i]
+                        i += 1
+                
+                return 'deploy', params
+        
+        except Exception as e:
+            print(f"⚠️  Error parsing CLI flags: {e}")
+        
+        return 'unknown', {}
+
     def parse_natural_language(self, command: str) -> Tuple[str, Dict]:
         """IMPROVED: Parse natural language command into action and parameters"""
-        command = command.strip().lower()
+        command = command.strip()
+        
+        # Check if this looks like a CLI-style command (has -- flags)
+        if '--' in command:
+            action, params = self.parse_cli_flags(command)
+            if action != 'unknown':
+                return action, params
+        
+        # Continue with existing natural language parsing...
+        command = command.lower()
         
         # Handle simple commands first
         if command in ['help', 'h', '?']:
@@ -522,12 +603,17 @@ class EpochInteractiveCLI:
             # Validate model file exists
             model_file = enhanced_params['model_file']
             
+            # Remove quotes if present
+            model_file = model_file.strip('"\'')
+            
             # Try different possible paths
             possible_paths = [
                 model_file,
                 os.path.join('outputs', model_file),
+                os.path.join('outputs', 'models', model_file),
                 f"{model_file}.joblib" if not model_file.endswith(('.joblib', '.pkl')) else model_file,
-                os.path.join('outputs', f"{model_file}.joblib") if not model_file.endswith(('.joblib', '.pkl')) else os.path.join('outputs', model_file)
+                os.path.join('outputs', f"{model_file}.joblib") if not model_file.endswith(('.joblib', '.pkl')) else os.path.join('outputs', model_file),
+                os.path.join('outputs', 'models', f"{model_file}.joblib") if not model_file.endswith(('.joblib', '.pkl')) else os.path.join('outputs', 'models', model_file)
             ]
             
             valid_path = None
@@ -542,17 +628,54 @@ class EpochInteractiveCLI:
             else:
                 print(f"❌ Model file not found: {model_file}")
                 print("💡 Available model files:")
-                model_files = glob.glob('*.joblib') + glob.glob('*.pkl') + glob.glob('outputs/*.joblib') + glob.glob('outputs/*.pkl')
+                model_files = (glob.glob('*.joblib') + glob.glob('*.pkl') + 
+                              glob.glob('outputs/*.joblib') + glob.glob('outputs/*.pkl') +
+                              glob.glob('outputs/models/*.joblib') + glob.glob('outputs/models/*.pkl'))
                 if model_files:
-                    for i, f in enumerate(model_files[:5], 1):  # Show first 5
+                    for i, f in enumerate(model_files[:10], 1):  # Show first 10
                         print(f"  {i}. {f}")
-                    if len(model_files) > 5:
-                        print(f"  ... and {len(model_files) - 5} more")
+                    if len(model_files) > 10:
+                        print(f"  ... and {len(model_files) - 10} more")
                 else:
-                    print("  No model files found in current directory or outputs/")
+                    print("  No model files found in current directory, outputs/, or outputs/models/")
                 return {}
         
         return enhanced_params
+
+    def prompt_for_model_file(self) -> Optional[str]:
+        """Interactive model file selection"""
+        # Look for model files
+        model_files = (glob.glob('*.joblib') + glob.glob('*.pkl') + 
+                      glob.glob('outputs/*.joblib') + glob.glob('outputs/*.pkl') +
+                      glob.glob('outputs/models/*.joblib') + glob.glob('outputs/models/*.pkl'))
+        
+        if not model_files:
+            print("❌ No model files found")
+            custom_path = input("Enter model file path manually: ").strip()
+            return custom_path if custom_path else None
+        
+        print("\n🗂️  Available model files:")
+        for i, f in enumerate(model_files, 1):
+            print(f"  {i:2d}. {f}")
+        
+        print(f"  {len(model_files) + 1:2d}. Enter custom path")
+        print(f"  {len(model_files) + 2:2d}. Skip (cancel)")
+        
+        try:
+            choice = input(f"\nSelect a model file (1-{len(model_files) + 2}): ").strip()
+            
+            if choice.isdigit():
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(model_files):
+                    return model_files[choice_idx]
+                elif choice_idx == len(model_files):
+                    # Custom path
+                    custom_path = input("Enter model file path: ").strip()
+                    return custom_path if custom_path else None
+        except (ValueError, KeyboardInterrupt):
+            pass
+        
+        return None
 
     def handle_train_command(self, params: Dict):
         """Handle training commands"""
@@ -724,90 +847,6 @@ class EpochInteractiveCLI:
         except Exception as e:
             print(f"❌ Deployment failed: {e}")
             print("💡 Check if the model file is valid and readable")
-    
-    def handle_compare_command(self, params: Dict):
-        """Handle model comparison commands with validation"""
-        # Validate and enhance parameters
-        params = self.validate_and_enhance_params('compare', params)
-        if not params:
-            return
-            
-        models = params.get('models', [])
-        dataset = params.get('dataset')
-        framework = params.get('framework')
-        
-        if not models and not framework:
-            # Use default comparison models
-            models = ['random_forest', 'xgboost', 'lightgbm', 'logistic_regression']
-            print(f"🏁 Using default models for comparison: {', '.join(models)}")
-        
-        # Import and call compare function from cli.py
-        try:
-            from cli import compare
-            
-            prompt = f"dataset: {dataset}"
-            
-            # Set up arguments
-            kwargs = {
-                'prompt': prompt,
-                'models': ','.join(models) if models else None,
-                'framework': framework,
-                'save_results': True,
-                'use_cv': params.get('use_cv', False),
-                'cv_folds': params.get('cv_folds', 5),
-                'generate_viz': True
-            }
-            
-            print(f"🏁 Comparing models on {dataset}")
-            if params.get('use_cv'):
-                print(f"📊 Using {params.get('cv_folds', 5)}-fold cross-validation")
-            
-            # Update session data
-            if models:
-                self.session_data['models_used'].update(models)
-            self.session_data['datasets_used'].add(dataset)
-            self.session_data['last_dataset'] = dataset
-            self.session_data['command_count'] += 1
-            
-            compare(**kwargs)
-            
-        except ImportError:
-            print("❌ Compare function not available")
-        except Exception as e:
-            print(f"❌ Comparison failed: {e}")
-
-    def handle_advisor_command(self, params: Dict):
-        """FIXED: Handle model advisor commands with proper validation"""
-        # Validate and enhance parameters first
-        params = self.validate_and_enhance_params('advisor', params)
-        if not params:
-            return
-            
-        dataset = params.get('dataset')
-        
-        print(f"🧠 Getting intelligent recommendations for {dataset}")
-        
-        try:
-            from cli import advisor
-            advisor(
-                dataset=dataset,  # Pass as positional argument
-                detailed=params.get('detailed', True),
-                auto_compare=params.get('auto_compare', False),
-                save_report=True,
-                prefer_interpretable=params.get('prefer_interpretable', False),
-                prefer_fast=params.get('prefer_fast', False)
-            )
-            
-            self.session_data['datasets_used'].add(dataset)
-            self.session_data['last_dataset'] = dataset
-            self.session_data['command_count'] += 1
-            
-        except ImportError:
-            print("❌ Advisor function not available")
-        except Exception as e:
-            print(f"❌ Advisor failed: {e}")
-            print("💡 Make sure the dataset name is correct")
-            print("💡 Available datasets: iris, wine, breast_cancer, penguins, etc.")
 
     def prompt_for_model(self) -> Optional[str]:
         """Interactive model selection"""
@@ -902,9 +941,6 @@ class EpochInteractiveCLI:
             
             elif action == 'compare':
                 self.handle_compare_command(params)
-
-            elif action == 'advisor':
-                self.handle_advisor_command(params)
             
             elif action == 'deploy':
                 self.handle_deploy_command(params)
@@ -949,19 +985,18 @@ class EpochInteractiveCLI:
         
         # Check for common typos and variations
         typo_corrections = {
-    'trian': 'train', 'tarni': 'train', 'traing': 'train',
-    'optimzie': 'optimize', 'opitmize': 'optimize',
-    'comapre': 'compare', 'comprae': 'compare',
-    'benchamrk': 'benchmark', 'bencmark': 'benchmark',
-    'ramdom': 'random', 'forst': 'forest',
-    'xgbost': 'xgboost', 'xgboost': 'xgboost',
-    'lgbm': 'lightgbm', 'lightbgm': 'lightgbm',
-    'analze': 'analyze', 'analize': 'analyze',
-    'advisr': 'advisor', 'advise': 'advisor',
-    'depoy': 'deploy', 'deplpy': 'deploy', 'deply': 'deploy',
-    'delpoy': 'deploy', 'depooy': 'deploy', 'depliy': 'deploy'
-}
-
+            'trian': 'train', 'tarni': 'train', 'traing': 'train',
+            'optimzie': 'optimize', 'opitmize': 'optimize',
+            'comapre': 'compare', 'comprae': 'compare',
+            'benchamrk': 'benchmark', 'bencmark': 'benchmark',
+            'ramdom': 'random', 'forst': 'forest',
+            'xgbost': 'xgboost', 'xgboost': 'xgboost',
+            'lgbm': 'lightgbm', 'lightbgm': 'lightgbm',
+            'analze': 'analyze', 'analize': 'analyze',
+            'advisr': 'advisor', 'advise': 'advisor',
+            'depoy': 'deploy', 'deplpy': 'deploy', 'deply': 'deploy',
+            'delpoy': 'deploy', 'depooy': 'deploy', 'depliy': 'deploy'
+        }
         
         # Check for direct typo corrections
         for typo, correction in typo_corrections.items():
@@ -1002,7 +1037,7 @@ class EpochInteractiveCLI:
     def handle_list_command(self, args: List[str]):
         """Handle list commands"""
         if not args:
-            print("📋 Available list options: models, datasets, frameworks, history")
+            print("📋 Available list options: models, datasets, frameworks, history, deployments")
             return
         
         command = args[0].lower()
@@ -1016,6 +1051,8 @@ class EpochInteractiveCLI:
             self.list_frameworks()
         elif command == 'history':
             self.show_history()
+        elif command == 'deployments':
+            self.list_deployments()
         else:
             print(f"❓ Unknown list command: {command}")
 
@@ -1058,6 +1095,20 @@ class EpochInteractiveCLI:
         for fw in sorted(frameworks):
             print(f"  • {fw}")
 
+    def list_deployments(self):
+        """List deployed models from session"""
+        if not self.session_data['deployed_models']:
+            print("📦 No models deployed in this session")
+            return
+        
+        print("📦 Deployed Models (This Session):")
+        for i, deployment in enumerate(self.session_data['deployed_models'], 1):
+            print(f"  {i}. {deployment['model_file']}")
+            print(f"     Output: {deployment['output_dir']}")
+            print(f"     Port: {deployment['port']}")
+            print(f"     Time: {deployment['timestamp']}")
+            print()
+
     def show_history(self):
         """Show recent command history"""
         try:
@@ -1088,6 +1139,8 @@ class EpochInteractiveCLI:
                 print(f"  Models used: {', '.join(sorted(self.session_data['models_used']))}")
             if self.session_data['datasets_used']:
                 print(f"  Datasets used: {', '.join(sorted(self.session_data['datasets_used']))}")
+            if self.session_data['deployed_models']:
+                print(f"  Models deployed: {len(self.session_data['deployed_models'])}")
             if self.session_data['last_model']:
                 print(f"  Last model: {self.session_data['last_model']}")
             if self.session_data['last_dataset']:

@@ -11,7 +11,7 @@ COPY main.py .
 COPY logistic_regression_iris.pkl .
 
 # Expose the port
-EXPOSE 8000
+EXPOSE 8080
 
 # Run the application
 CMD ["python", "main.py"]

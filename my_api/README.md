@@ -13,9 +13,9 @@
    ```
 
 3. **Access the API:**
-   - Main endpoint: http://localhost:8000
-   - API Documentation: http://localhost:8000/docs
-   - Alternative docs: http://localhost:8000/redoc
+   - Main endpoint: http://localhost:8080
+   - API Documentation: http://localhost:8080/docs
+   - Alternative docs: http://localhost:8080/redoc
 
 ## API Endpoints
 
@@ -28,10 +28,10 @@
 ### Using curl:
 ```bash
 # Health check
-curl http://localhost:8000/
+curl http://localhost:8080/
 
 # Make prediction (adjust features as needed)
-curl -X POST "http://localhost:8000/predict" \
+curl -X POST "http://localhost:8080/predict" \
      -H "Content-Type: application/json" \
      -d '{"features": [1.0, 2.0, 3.0, 4.0]}'
 ```
@@ -42,13 +42,13 @@ import requests
 
 # Make prediction
 response = requests.post(
-    "http://localhost:8000/predict",
+    "http://localhost:8080/predict",
     json={"features": [1.0, 2.0, 3.0, 4.0]}
 )
 print(response.json())
 ```
 
 ## Model Information
-- **Model file:** g:\codes\mlcursor\outputs\models\logistic_regression_iris.pkl
-- **Port:** 8000
-- **Generated:** 2025-08-10 11:07:01
+- **Model file:** G:\Codes\mlcursor\outputs\models\logistic_regression_iris.pkl
+- **Port:** 8080
+- **Generated:** 2025-08-10 11:29:07

@@ -7,10 +7,10 @@ import os
 
 # Load the trained model
 try:
-    model = joblib.load("g:\codes\mlcursor\outputs\models\logistic_regression_iris.pkl")
-    print(f"✅ Model loaded successfully from: g:\codes\mlcursor\outputs\models\logistic_regression_iris.pkl")
+    model = joblib.load("G:\Codes\mlcursor\outputs\models\logistic_regression_iris.pkl")
+    print(f"✅ Model loaded successfully from: G:\Codes\mlcursor\outputs\models\logistic_regression_iris.pkl")
 except Exception as e:
-    print(f"❌ Error loading model from g:\codes\mlcursor\outputs\models\logistic_regression_iris.pkl: {e}")
+    print(f"❌ Error loading model from G:\Codes\mlcursor\outputs\models\logistic_regression_iris.pkl: {e}")
     raise
 
 app = FastAPI(
@@ -31,7 +31,7 @@ def home():
     """Health check endpoint"""
     return {
         "message": "FastAPI ML Model is running",
-        "model_path": "g:\codes\mlcursor\outputs\models\logistic_regression_iris.pkl",
+        "model_path": "G:\Codes\mlcursor\outputs\models\logistic_regression_iris.pkl",
         "status": "healthy",
         "endpoints": ["/predict", "/health", "/docs"]
     }
@@ -87,14 +87,14 @@ def predict(request: PredictionRequest):
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting FastAPI ML Model Server...")
-    print(f"📊 Model: g:\codes\mlcursor\outputs\models\logistic_regression_iris.pkl")
-    print(f"🌐 Server will run on: http://localhost:8000")
-    print(f"📖 API Documentation: http://localhost:8000/docs")
-    print(f"⚡ Interactive API: http://localhost:8000/redoc")
+    print(f"📊 Model: G:\Codes\mlcursor\outputs\models\logistic_regression_iris.pkl")
+    print(f"🌐 Server will run on: http://localhost:8080")
+    print(f"📖 API Documentation: http://localhost:8080/docs")
+    print(f"⚡ Interactive API: http://localhost:8080/redoc")
     
     uvicorn.run(
         app, 
         host="0.0.0.0", 
-        port=8000,
+        port=8080,
         log_level="info"
     )

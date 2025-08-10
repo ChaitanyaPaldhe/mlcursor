@@ -856,7 +856,7 @@ os.makedirs("outputs/models", exist_ok=True)
 # Generate model filename
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 cv_suffix = "_cv" if use_cv else ""
-model_filename = f"{model_name}_{dataset}{cv_suffix}_{timestamp}"
+model_filename = f"{model_name}_{dataset}"
 
 try:
     {% if framework == "sklearn" or framework == "xgboost" or framework == "lightgbm" or framework == "catboost" %}
