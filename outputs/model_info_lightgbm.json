@@ -1,6 +1,6 @@
 {
-  "model_name": "random_forest",
-  "framework": "sklearn",
+  "model_name": "lightgbm",
+  "framework": "xgboost|lightgbm|catboost",
   "dataset": "penguins",
   "task_type": "classification",
   "cross_validation": {
@@ -9,22 +9,24 @@
     "strategy": null
   },
   "config": {
-    "class": "RandomForestClassifier",
-    "framework": "sklearn",
-    "import": "from sklearn.ensemble import RandomForestClassifier",
+    "class": "LGBMClassifier",
+    "framework": "lightgbm",
+    "import": "import lightgbm as lgb",
     "default_params": {
       "n_estimators": 100,
-      "random_state": 42,
-      "max_depth": null
+      "learning_rate": 0.1,
+      "random_state": 42
     }
   },
   "training_params": {
     "learning_rate": 0.01,
     "epochs": 50,
-    "optimizer": "None",
+    "optimizer": "adam",
     "other_params": {
+      "feature_fraction_seed": 24,
+      "bagging_seed": 19,
       "n_estimators": 100,
-      "max_depth": null,
+      "learning_rate": 0.1,
       "random_state": 42
     }
   }

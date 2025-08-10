@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler, LabelEncoder
 from sklearn.feature_selection import (
     SelectKBest, f_classif, f_regression, mutual_info_classif, 
-    mutual_info_regression, RFE, SelectFromModel
+    mutual_info_regression, RFE, SelectFromModel, VarianceThreshold
 )
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LassoCV, Ridge
@@ -32,12 +32,13 @@ class FeatureEngineeringResult:
     transformation_pipeline: Optional[Any] = None
 
 class AutomatedFeatureEngineer:
-    """Comprehensive automated feature engineering system"""
+    """Comprehensive automated feature engineering system with robust categorical handling"""
     
     def __init__(self, task_type: str = "auto"):
         self.task_type = task_type
         self.feature_importance_cache = {}
         self.transformation_history = []
+        self.label_encoders = {}  # Store encoders for consistency
         
         # Feature generation strategies
         self.polynomial_strategies = {
@@ -206,6 +207,254 @@ class AutomatedFeatureEngineer:
                 log.append(f"Applied feature selection: {method} (k={k})")
         
         return X
+    
+    def _encode_categorical_for_selection(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Encode categorical variables specifically for feature selection"""
+        X_encoded = X.copy()
+        
+        # Handle categorical columns
+        categorical_cols = X_encoded.select_dtypes(include=['object', 'category']).columns
+        
+        for col in categorical_cols:
+            # Handle missing values first
+            X_encoded[col] = X_encoded[col].fillna('missing')
+            
+            unique_values = X_encoded[col].nunique()
+            
+            if unique_values <= 10:  # One-hot encode low cardinality
+                dummies = pd.get_dummies(X_encoded[col], prefix=col, dummy_na=False)
+                X_encoded = pd.concat([X_encoded, dummies], axis=1)
+                X_encoded.drop(col, axis=1, inplace=True)
+            else:  # Label encode high cardinality
+                if col not in self.label_encoders:
+                    self.label_encoders[col] = LabelEncoder()
+                    X_encoded[col] = self.label_encoders[col].fit_transform(X_encoded[col].astype(str))
+                else:
+                    # Handle new categories in test data
+                    known_categories = set(self.label_encoders[col].classes_)
+                    X_encoded[col] = X_encoded[col].apply(
+                        lambda x: x if x in known_categories else 'unknown'
+                    )
+                    # Refit if we have new 'unknown' category
+                    if 'unknown' not in known_categories:
+                        X_encoded[col] = self.label_encoders[col].fit_transform(X_encoded[col].astype(str))
+                    else:
+                        X_encoded[col] = self.label_encoders[col].transform(X_encoded[col].astype(str))
+        
+        # Handle any remaining missing values in numeric columns
+        numeric_cols = X_encoded.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            if X_encoded[col].isnull().any():
+                X_encoded[col] = X_encoded[col].fillna(X_encoded[col].median())
+        
+        # Ensure all columns are numeric (final safety check)
+        for col in X_encoded.columns:
+            if X_encoded[col].dtype == 'object':
+                try:
+                    X_encoded[col] = pd.to_numeric(X_encoded[col], errors='coerce')
+                    X_encoded[col] = X_encoded[col].fillna(0)
+                except:
+                    # If conversion fails, drop the column
+                    logger.warning(f"Dropping column {col} - could not convert to numeric")
+                    X_encoded.drop(col, axis=1, inplace=True)
+        
+        return X_encoded
+    
+    def select_features(self, X: pd.DataFrame, y: pd.Series, method: str = "univariate", 
+                       k: int = 50, **kwargs) -> pd.DataFrame:
+        """Feature selection using specified method with proper categorical encoding"""
+        
+        logger.info(f"Applying {method} feature selection with k={k}")
+        
+        # Detect task type if not set
+        if self.task_type == "auto":
+            self.task_type = self._detect_task_type(y)
+        
+        if method in self.selection_methods:
+            return self.selection_methods[method](X, y, k, **kwargs)
+        else:
+            raise ValueError(f"Unknown selection method: {method}")
+    
+    def _univariate_selection(self, X: pd.DataFrame, y: pd.Series, k: int, **kwargs) -> pd.DataFrame:
+        """Univariate feature selection with proper categorical encoding"""
+        
+        # First, encode categorical variables
+        X_encoded = self._encode_categorical_for_selection(X)
+        
+        if len(X_encoded.columns) == 0:
+            logger.error("No features remaining after encoding")
+            return X_encoded
+        
+        # Ensure target is properly encoded for classification
+        y_encoded = y.copy()
+        if self.task_type == "classification" and y_encoded.dtype == 'object':
+            y_encoded = LabelEncoder().fit_transform(y_encoded)
+        
+        if self.task_type == "classification":
+            score_func = f_classif
+        else:
+            score_func = f_regression
+        
+        k_actual = min(k, X_encoded.shape[1])
+        selector = SelectKBest(score_func=score_func, k=k_actual)
+        
+        try:
+            X_selected = selector.fit_transform(X_encoded, y_encoded)
+            selected_features = X_encoded.columns[selector.get_support()].tolist()
+            logger.info(f"Selected {len(selected_features)} features using univariate selection")
+            return X_encoded[selected_features]
+        except Exception as e:
+            logger.error(f"Univariate selection failed: {e}")
+            # Return top k features by variance as fallback
+            return self._variance_selection(X, y, k)
+    
+    def _recursive_feature_elimination(self, X: pd.DataFrame, y: pd.Series, k: int, **kwargs) -> pd.DataFrame:
+        """Recursive feature elimination with proper categorical encoding"""
+        
+        # First, encode categorical variables
+        X_encoded = self._encode_categorical_for_selection(X)
+        
+        if len(X_encoded.columns) == 0:
+            logger.error("No features remaining after encoding")
+            return X_encoded
+        
+        # Ensure target is properly encoded
+        y_encoded = y.copy()
+        if self.task_type == "classification" and y_encoded.dtype == 'object':
+            y_encoded = LabelEncoder().fit_transform(y_encoded)
+        
+        if self.task_type == "classification":
+            estimator = RandomForestClassifier(n_estimators=50, random_state=42)
+        else:
+            estimator = RandomForestRegressor(n_estimators=50, random_state=42)
+        
+        k_actual = min(k, X_encoded.shape[1])
+        selector = RFE(estimator=estimator, n_features_to_select=k_actual)
+        
+        try:
+            X_selected = selector.fit_transform(X_encoded, y_encoded)
+            selected_features = X_encoded.columns[selector.get_support()].tolist()
+            logger.info(f"Selected {len(selected_features)} features using RFE")
+            return X_encoded[selected_features]
+        except Exception as e:
+            logger.error(f"RFE selection failed: {e}")
+            # Return top k features by importance as fallback
+            return self._model_based_selection(X, y, k)
+    
+    def _model_based_selection(self, X: pd.DataFrame, y: pd.Series, k: int, **kwargs) -> pd.DataFrame:
+        """Model-based feature selection with proper categorical encoding"""
+        
+        # First, encode categorical variables
+        X_encoded = self._encode_categorical_for_selection(X)
+        
+        if len(X_encoded.columns) == 0:
+            logger.error("No features remaining after encoding")
+            return X_encoded
+        
+        # Ensure target is properly encoded
+        y_encoded = y.copy()
+        if self.task_type == "classification" and y_encoded.dtype == 'object':
+            y_encoded = LabelEncoder().fit_transform(y_encoded)
+        
+        if self.task_type == "classification":
+            estimator = RandomForestClassifier(n_estimators=50, random_state=42)
+        else:
+            try:
+                estimator = LassoCV(random_state=42, max_iter=1000)
+            except:
+                # Fallback to Random Forest for regression if Lasso fails
+                estimator = RandomForestRegressor(n_estimators=50, random_state=42)
+        
+        try:
+            k_actual = min(k, X_encoded.shape[1])
+            selector = SelectFromModel(estimator, max_features=k_actual)
+            X_selected = selector.fit_transform(X_encoded, y_encoded)
+            selected_features = X_encoded.columns[selector.get_support()].tolist()
+            
+            # If no features selected, fall back to top k by feature importance
+            if len(selected_features) == 0:
+                logger.warning("No features selected by model. Using feature importance fallback.")
+                importance = self._calculate_feature_importance(X_encoded, y_encoded)
+                top_features = list(importance.keys())[:k_actual]
+                selected_features = top_features
+            
+            logger.info(f"Selected {len(selected_features)} features using model-based selection")
+            return X_encoded[selected_features]
+        except Exception as e:
+            logger.error(f"Model-based selection failed: {e}")
+            # Return top k features by variance as fallback
+            return self._variance_selection(X, y, k)
+    
+    def _correlation_selection(self, X: pd.DataFrame, y: pd.Series, k: int, 
+                             threshold: float = 0.95, **kwargs) -> pd.DataFrame:
+        """Remove highly correlated features with categorical encoding"""
+        
+        # First, encode categorical variables
+        X_encoded = self._encode_categorical_for_selection(X)
+        
+        if len(X_encoded.columns) == 0:
+            logger.error("No features remaining after encoding")
+            return X_encoded
+        
+        try:
+            # Calculate correlation matrix
+            corr_matrix = X_encoded.corr().abs()
+            
+            # Find features to remove
+            upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+            to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > threshold)]
+            
+            # Remove correlated features
+            X_selected = X_encoded.drop(columns=to_drop)
+            
+            # If still too many features, select top k by importance
+            if len(X_selected.columns) > k:
+                y_encoded = y.copy()
+                if self.task_type == "classification" and y_encoded.dtype == 'object':
+                    y_encoded = LabelEncoder().fit_transform(y_encoded)
+                importance = self._calculate_feature_importance(X_selected, y_encoded)
+                top_features = list(importance.keys())[:k]
+                X_selected = X_selected[top_features]
+            
+            logger.info(f"Selected {len(X_selected.columns)} features using correlation selection")
+            return X_selected
+        except Exception as e:
+            logger.error(f"Correlation selection failed: {e}")
+            return self._variance_selection(X, y, k)
+    
+    def _variance_selection(self, X: pd.DataFrame, y: pd.Series, k: int, 
+                          threshold: float = 0.01, **kwargs) -> pd.DataFrame:
+        """Remove low variance features with categorical encoding"""
+        
+        # First, encode categorical variables
+        X_encoded = self._encode_categorical_for_selection(X)
+        
+        if len(X_encoded.columns) == 0:
+            logger.error("No features remaining after encoding")
+            return X_encoded
+        
+        try:
+            selector = VarianceThreshold(threshold=threshold)
+            X_selected = selector.fit_transform(X_encoded)
+            selected_features = X_encoded.columns[selector.get_support()].tolist()
+            X_result = X_encoded[selected_features]
+            
+            # If still too many features, select top k by importance
+            if len(X_result.columns) > k:
+                y_encoded = y.copy()
+                if self.task_type == "classification" and y_encoded.dtype == 'object':
+                    y_encoded = LabelEncoder().fit_transform(y_encoded)
+                importance = self._calculate_feature_importance(X_result, y_encoded)
+                top_features = list(importance.keys())[:k]
+                X_result = X_result[top_features]
+            
+            logger.info(f"Selected {len(X_result.columns)} features using variance selection")
+            return X_result
+        except Exception as e:
+            logger.error(f"Variance selection failed: {e}")
+            # Final fallback: return first k features
+            k_actual = min(k, len(X_encoded.columns))
+            return X_encoded.iloc[:, :k_actual]
     
     def _create_polynomial_features(self, X: pd.DataFrame, numerical_cols: List[str], 
                                   degree: int = 2, interaction_only: bool = False, 
@@ -430,21 +679,26 @@ class AutomatedFeatureEngineer:
         return series.map(target_mapping).fillna(global_mean)
     
     def _calculate_feature_importance(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
-        """Calculate feature importance using multiple methods"""
+        """Calculate feature importance using Random Forest"""
         
-        if self.task_type == "classification":
-            rf_model = RandomForestClassifier(n_estimators=50, random_state=42)
-        else:
-            rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
-        
-        # Fit model and get importance
-        rf_model.fit(X, y)
-        importance_scores = dict(zip(X.columns, rf_model.feature_importances_))
-        
-        # Sort by importance
-        importance_scores = dict(sorted(importance_scores.items(), key=lambda x: x[1], reverse=True))
-        
-        return importance_scores
+        try:
+            if self.task_type == "classification":
+                rf_model = RandomForestClassifier(n_estimators=50, random_state=42)
+            else:
+                rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
+            
+            # Fit model and get importance
+            rf_model.fit(X, y)
+            importance_scores = dict(zip(X.columns, rf_model.feature_importances_))
+            
+            # Sort by importance
+            importance_scores = dict(sorted(importance_scores.items(), key=lambda x: x[1], reverse=True))
+            
+            return importance_scores
+        except Exception as e:
+            logger.error(f"Feature importance calculation failed: {e}")
+            # Return uniform importance as fallback
+            return {col: 1.0 / len(X.columns) for col in X.columns}
     
     def _intelligent_feature_selection(self, X: pd.DataFrame, y: pd.Series, 
                                      max_features: int = 50) -> pd.DataFrame:
@@ -454,7 +708,6 @@ class AutomatedFeatureEngineer:
             return X
         
         # Method 1: Remove low variance features
-        from sklearn.feature_selection import VarianceThreshold
         selector = VarianceThreshold(threshold=0.01)
         X_selected = selector.fit_transform(X)
         selected_features = X.columns[selector.get_support()].tolist()
@@ -478,98 +731,6 @@ class AutomatedFeatureEngineer:
         X = X[top_features]
         
         return X
-    
-    def select_features(self, X: pd.DataFrame, y: pd.Series, method: str = "univariate", 
-                       k: int = 50, **kwargs) -> pd.DataFrame:
-        """Feature selection using specified method"""
-        
-        if method in self.selection_methods:
-            return self.selection_methods[method](X, y, k, **kwargs)
-        else:
-            raise ValueError(f"Unknown selection method: {method}")
-    
-    def _univariate_selection(self, X: pd.DataFrame, y: pd.Series, k: int, **kwargs) -> pd.DataFrame:
-        """Univariate feature selection"""
-        
-        if self.task_type == "classification":
-            score_func = f_classif
-        else:
-            score_func = f_regression
-        
-        selector = SelectKBest(score_func=score_func, k=min(k, X.shape[1]))
-        X_selected = selector.fit_transform(X, y)
-        selected_features = X.columns[selector.get_support()].tolist()
-        
-        return X[selected_features]
-    
-    def _recursive_feature_elimination(self, X: pd.DataFrame, y: pd.Series, k: int, **kwargs) -> pd.DataFrame:
-        """Recursive feature elimination"""
-        
-        if self.task_type == "classification":
-            estimator = RandomForestClassifier(n_estimators=50, random_state=42)
-        else:
-            estimator = RandomForestRegressor(n_estimators=50, random_state=42)
-        
-        selector = RFE(estimator=estimator, n_features_to_select=min(k, X.shape[1]))
-        X_selected = selector.fit_transform(X, y)
-        selected_features = X.columns[selector.get_support()].tolist()
-        
-        return X[selected_features]
-    
-    def _model_based_selection(self, X: pd.DataFrame, y: pd.Series, k: int, **kwargs) -> pd.DataFrame:
-        """Model-based feature selection"""
-        
-        if self.task_type == "classification":
-            estimator = RandomForestClassifier(n_estimators=50, random_state=42)
-        else:
-            estimator = LassoCV(random_state=42)
-        
-        selector = SelectFromModel(estimator, max_features=min(k, X.shape[1]))
-        X_selected = selector.fit_transform(X, y)
-        selected_features = X.columns[selector.get_support()].tolist()
-        
-        return X[selected_features]
-    
-    def _correlation_selection(self, X: pd.DataFrame, y: pd.Series, k: int, 
-                             threshold: float = 0.95, **kwargs) -> pd.DataFrame:
-        """Remove highly correlated features"""
-        
-        # Calculate correlation matrix
-        corr_matrix = X.corr().abs()
-        
-        # Find features to remove
-        upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > threshold)]
-        
-        # Remove correlated features
-        X_selected = X.drop(columns=to_drop)
-        
-        # If still too many features, select top k by importance
-        if len(X_selected.columns) > k:
-            importance = self._calculate_feature_importance(X_selected, y)
-            top_features = list(importance.keys())[:k]
-            X_selected = X_selected[top_features]
-        
-        return X_selected
-    
-    def _variance_selection(self, X: pd.DataFrame, y: pd.Series, k: int, 
-                          threshold: float = 0.01, **kwargs) -> pd.DataFrame:
-        """Remove low variance features"""
-        
-        from sklearn.feature_selection import VarianceThreshold
-        
-        selector = VarianceThreshold(threshold=threshold)
-        X_selected = selector.fit_transform(X)
-        selected_features = X.columns[selector.get_support()].tolist()
-        X_result = X[selected_features]
-        
-        # If still too many features, select top k by importance
-        if len(X_result.columns) > k:
-            importance = self._calculate_feature_importance(X_result, y)
-            top_features = list(importance.keys())[:k]
-            X_result = X_result[top_features]
-        
-        return X_result
     
     def _detect_task_type(self, y: pd.Series) -> str:
         """Detect if task is classification or regression"""
@@ -700,7 +861,7 @@ class FeatureEngineeringRecommender:
                 })
         
         # Check for class imbalance (if classification target provided)
-        if y is not None and y.dtype == 'object' or (y.nunique() < 20 and len(y) > 100):
+        if y is not None and (y.dtype == 'object' or (y.nunique() < 20 and len(y) > 100)):
             class_counts = y.value_counts()
             imbalance_ratio = class_counts.max() / class_counts.min()
             if imbalance_ratio > 5:
@@ -720,6 +881,157 @@ class FeatureEngineeringRecommender:
             })
         
         return analysis
+
+
+class AdvancedFeatureEngineer:
+    """Advanced feature engineering with domain-specific techniques"""
+    
+    def __init__(self):
+        self.encoders = {}
+        self.scalers = {}
+        self.transformers = {}
+    
+    def create_domain_specific_features(self, X: pd.DataFrame, domain: str = "general") -> pd.DataFrame:
+        """Create domain-specific features"""
+        
+        if domain == "finance":
+            return self._create_financial_features(X)
+        elif domain == "text":
+            return self._create_text_features(X)
+        elif domain == "image":
+            return self._create_image_features(X)
+        elif domain == "time_series":
+            return self._create_time_series_features(X)
+        else:
+            return self._create_general_features(X)
+    
+    def _create_financial_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Create financial domain-specific features"""
+        
+        # Assuming common financial columns
+        price_columns = [col for col in X.columns if any(keyword in col.lower() 
+                        for keyword in ['price', 'value', 'amount', 'cost'])]
+        
+        for col in price_columns:
+            if X[col].dtype in [np.number]:
+                # Price-based features
+                X[f"{col}_pct_change"] = X[col].pct_change()
+                X[f"{col}_volatility"] = X[col].rolling(window=30).std()
+                X[f"{col}_momentum"] = X[col] / X[col].shift(10) - 1
+                
+                # Moving averages
+                X[f"{col}_sma_10"] = X[col].rolling(window=10).mean()
+                X[f"{col}_sma_30"] = X[col].rolling(window=30).mean()
+                X[f"{col}_rsi"] = self._calculate_rsi(X[col])
+        
+        return X
+    
+    def _create_text_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Create text domain-specific features"""
+        
+        text_columns = X.select_dtypes(include=['object']).columns
+        
+        for col in text_columns:
+            if X[col].dtype == 'object':
+                # Text statistics
+                X[f"{col}_length"] = X[col].astype(str).str.len()
+                X[f"{col}_word_count"] = X[col].astype(str).str.split().str.len()
+                X[f"{col}_char_count"] = X[col].astype(str).str.len()
+                X[f"{col}_digit_count"] = X[col].astype(str).str.count(r'\d')
+                X[f"{col}_upper_count"] = X[col].astype(str).str.count(r'[A-Z]')
+                
+                # Sentiment analysis (simplified)
+                positive_words = ['good', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic']
+                negative_words = ['bad', 'terrible', 'awful', 'horrible', 'disappointing']
+                
+                X[f"{col}_positive_words"] = X[col].astype(str).str.lower().apply(
+                    lambda x: sum(1 for word in positive_words if word in x)
+                )
+                X[f"{col}_negative_words"] = X[col].astype(str).str.lower().apply(
+                    lambda x: sum(1 for word in negative_words if word in x)
+                )
+        
+        return X
+    
+    def _create_image_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Create image domain-specific features - placeholder"""
+        # This would be implemented for image data processing
+        return X
+    
+    def _create_time_series_features(self, X: pd.DataFrame, date_col: str = None) -> pd.DataFrame:
+        """Create comprehensive time series features"""
+        
+        # Find date column if not specified
+        if date_col is None:
+            date_columns = []
+            for col in X.columns:
+                if X[col].dtype == 'datetime64[ns]' or 'date' in col.lower():
+                    date_columns.append(col)
+            
+            if date_columns:
+                date_col = date_columns[0]
+            else:
+                return X
+        
+        if date_col not in X.columns:
+            return X
+        
+        # Ensure datetime type
+        X[date_col] = pd.to_datetime(X[date_col])
+        
+        # Cyclical time features
+        X['hour_sin'] = np.sin(2 * np.pi * X[date_col].dt.hour / 24)
+        X['hour_cos'] = np.cos(2 * np.pi * X[date_col].dt.hour / 24)
+        X['day_sin'] = np.sin(2 * np.pi * X[date_col].dt.day / 31)
+        X['day_cos'] = np.cos(2 * np.pi * X[date_col].dt.day / 31)
+        X['month_sin'] = np.sin(2 * np.pi * X[date_col].dt.month / 12)
+        X['month_cos'] = np.cos(2 * np.pi * X[date_col].dt.month / 12)
+        X['dayofweek_sin'] = np.sin(2 * np.pi * X[date_col].dt.dayofweek / 7)
+        X['dayofweek_cos'] = np.cos(2 * np.pi * X[date_col].dt.dayofweek / 7)
+        
+        # Holiday indicators (simplified)
+        X['is_month_start'] = X[date_col].dt.is_month_start.astype(int)
+        X['is_month_end'] = X[date_col].dt.is_month_end.astype(int)
+        X['is_quarter_start'] = X[date_col].dt.is_quarter_start.astype(int)
+        X['is_quarter_end'] = X[date_col].dt.is_quarter_end.astype(int)
+        
+        return X
+    
+    def _create_general_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Create general-purpose advanced features"""
+        
+        numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+        
+        # Interaction features with feature selection
+        if len(numerical_cols) >= 2:
+            # Create interactions only for highly correlated features
+            corr_matrix = X[numerical_cols].corr().abs()
+            
+            for i, col1 in enumerate(numerical_cols):
+                for j, col2 in enumerate(numerical_cols[i+1:], i+1):
+                    if corr_matrix.iloc[i, j] > 0.3:  # Only create interactions for correlated features
+                        X[f"{col1}_{col2}_interaction"] = X[col1] * X[col2]
+                        X[f"{col1}_{col2}_ratio"] = X[col1] / (X[col2] + 1e-8)
+        
+        # Advanced statistical features
+        if len(numerical_cols) >= 3:
+            X_num = X[numerical_cols]
+            X['feature_sum'] = X_num.sum(axis=1)
+            X['feature_mean'] = X_num.mean(axis=1)
+            X['feature_std'] = X_num.std(axis=1)
+            X['feature_skew'] = X_num.skew(axis=1)
+            X['feature_kurtosis'] = X_num.kurtosis(axis=1)
+        
+        return X
+    
+    def _calculate_rsi(self, prices: pd.Series, window: int = 14) -> pd.Series:
+        """Calculate Relative Strength Index"""
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
 
 
 # Utility functions for CLI integration
@@ -764,7 +1076,6 @@ def parse_custom_operations_from_prompt(prompt: str) -> Dict[str, Any]:
         operation = {"type": "polynomial"}
         
         # Extract degree
-        import re
         degree_match = re.search(r"degree\s*(\d+)", prompt_lower)
         if degree_match:
             operation["degree"] = int(degree_match.group(1))
@@ -884,152 +1195,6 @@ def print_engineering_report(result: FeatureEngineeringResult, show_details: boo
             print(f"   • ... and {len(result.removed_features) - 10} more")
     
     print("="*80)
-
-
-class AdvancedFeatureEngineer:
-    """Advanced feature engineering with domain-specific techniques"""
-    
-    def __init__(self):
-        self.encoders = {}
-        self.scalers = {}
-        self.transformers = {}
-    
-    def create_domain_specific_features(self, X: pd.DataFrame, domain: str = "general") -> pd.DataFrame:
-        """Create domain-specific features"""
-        
-        if domain == "finance":
-            return self._create_financial_features(X)
-        elif domain == "text":
-            return self._create_text_features(X)
-        elif domain == "image":
-            return self._create_image_features(X)
-        elif domain == "time_series":
-            return self._create_time_series_features(X)
-        else:
-            return self._create_general_features(X)
-    
-    def _create_financial_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Create financial domain-specific features"""
-        
-        # Assuming common financial columns
-        price_columns = [col for col in X.columns if any(keyword in col.lower() 
-                        for keyword in ['price', 'value', 'amount', 'cost'])]
-        
-        for col in price_columns:
-            if X[col].dtype in [np.number]:
-                # Price-based features
-                X[f"{col}_pct_change"] = X[col].pct_change()
-                X[f"{col}_volatility"] = X[col].rolling(window=30).std()
-                X[f"{col}_momentum"] = X[col] / X[col].shift(10) - 1
-                
-                # Moving averages
-                X[f"{col}_sma_10"] = X[col].rolling(window=10).mean()
-                X[f"{col}_sma_30"] = X[col].rolling(window=30).mean()
-                X[f"{col}_rsi"] = self._calculate_rsi(X[col])
-        
-        return X
-    
-    def _create_text_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Create text domain-specific features"""
-        
-        text_columns = X.select_dtypes(include=['object']).columns
-        
-        for col in text_columns:
-            if X[col].dtype == 'object':
-                # Text statistics
-                X[f"{col}_length"] = X[col].astype(str).str.len()
-                X[f"{col}_word_count"] = X[col].astype(str).str.split().str.len()
-                X[f"{col}_char_count"] = X[col].astype(str).str.len()
-                X[f"{col}_digit_count"] = X[col].astype(str).str.count(r'\d')
-                X[f"{col}_upper_count"] = X[col].astype(str).str.count(r'[A-Z]')
-                
-                # Sentiment analysis (simplified)
-                positive_words = ['good', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic']
-                negative_words = ['bad', 'terrible', 'awful', 'horrible', 'disappointing']
-                
-                X[f"{col}_positive_words"] = X[col].astype(str).str.lower().apply(
-                    lambda x: sum(1 for word in positive_words if word in x)
-                )
-                X[f"{col}_negative_words"] = X[col].astype(str).str.lower().apply(
-                    lambda x: sum(1 for word in negative_words if word in x)
-                )
-        
-        return X
-    
-    def _create_time_series_features(self, X: pd.DataFrame, date_col: str = None) -> pd.DataFrame:
-        """Create comprehensive time series features"""
-        
-        # Find date column if not specified
-        if date_col is None:
-            date_columns = []
-            for col in X.columns:
-                if X[col].dtype == 'datetime64[ns]' or 'date' in col.lower():
-                    date_columns.append(col)
-            
-            if date_columns:
-                date_col = date_columns[0]
-            else:
-                return X
-        
-        if date_col not in X.columns:
-            return X
-        
-        # Ensure datetime type
-        X[date_col] = pd.to_datetime(X[date_col])
-        
-        # Cyclical time features
-        X['hour_sin'] = np.sin(2 * np.pi * X[date_col].dt.hour / 24)
-        X['hour_cos'] = np.cos(2 * np.pi * X[date_col].dt.hour / 24)
-        X['day_sin'] = np.sin(2 * np.pi * X[date_col].dt.day / 31)
-        X['day_cos'] = np.cos(2 * np.pi * X[date_col].dt.day / 31)
-        X['month_sin'] = np.sin(2 * np.pi * X[date_col].dt.month / 12)
-        X['month_cos'] = np.cos(2 * np.pi * X[date_col].dt.month / 12)
-        X['dayofweek_sin'] = np.sin(2 * np.pi * X[date_col].dt.dayofweek / 7)
-        X['dayofweek_cos'] = np.cos(2 * np.pi * X[date_col].dt.dayofweek / 7)
-        
-        # Holiday indicators (simplified)
-        X['is_month_start'] = X[date_col].dt.is_month_start.astype(int)
-        X['is_month_end'] = X[date_col].dt.is_month_end.astype(int)
-        X['is_quarter_start'] = X[date_col].dt.is_quarter_start.astype(int)
-        X['is_quarter_end'] = X[date_col].dt.is_quarter_end.astype(int)
-        
-        return X
-    
-    def _create_general_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Create general-purpose advanced features"""
-        
-        numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
-        
-        # Interaction features with feature selection
-        if len(numerical_cols) >= 2:
-            # Create interactions only for highly correlated features
-            corr_matrix = X[numerical_cols].corr().abs()
-            
-            for i, col1 in enumerate(numerical_cols):
-                for j, col2 in enumerate(numerical_cols[i+1:], i+1):
-                    if corr_matrix.iloc[i, j] > 0.3:  # Only create interactions for correlated features
-                        X[f"{col1}_{col2}_interaction"] = X[col1] * X[col2]
-                        X[f"{col1}_{col2}_ratio"] = X[col1] / (X[col2] + 1e-8)
-        
-        # Advanced statistical features
-        if len(numerical_cols) >= 3:
-            X_num = X[numerical_cols]
-            X['feature_sum'] = X_num.sum(axis=1)
-            X['feature_mean'] = X_num.mean(axis=1)
-            X['feature_std'] = X_num.std(axis=1)
-            X['feature_skew'] = X_num.skew(axis=1)
-            X['feature_kurtosis'] = X_num.kurtosis(axis=1)
-        
-        return X
-    
-    def _calculate_rsi(self, prices: pd.Series, window: int = 14) -> pd.Series:
-        """Calculate Relative Strength Index"""
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
 
 
 # Main feature engineering function for CLI
